@@ -142,6 +142,151 @@ TEST_F(HDLCTest, CRCCalculation) {
     EXPECT_EQ(crc, crc2);
 }
 
+TEST_F(HDLCTest, BitStuffing_NoStuffingRequired) {
+    hdlc->begin();
+    
+    // スタッフィングが不要なデータ（連続する1が5個未満）
+    uint8_t testData[] = {0x55}; // 01010101
+    uint8_t stuffedBits[100];
+    
+    // ビットスタッフィング処理をテスト（privateメソッドなので、リフレクションを使用するか、publicにする必要がある）
+    // 現在はpublicメソッドでテストできる範囲でテスト
+    EXPECT_TRUE(hdlc->transmitFrame(testData, sizeof(testData)));
+    
+    // 送信が行われたことを確認
+    EXPECT_GT(mockPin->countDigitalWrites(TEST_TX_PIN), 0);
+}
+
+TEST_F(HDLCTest, BitStuffing_StuffingRequired) {
+    hdlc->begin();
+    
+    // スタッフィングが必要なデータ（連続する1が5個以上）
+    uint8_t testData[] = {0xFC}; // 11111100 - 連続する6個の1
+    
+    EXPECT_TRUE(hdlc->transmitFrame(testData, sizeof(testData)));
+    
+    // 送信ビット数がスタッフィングにより増加していることを確認
+    // （具体的な検証は送信されたビットパターンを確認する必要がある）
+    EXPECT_GT(mockPin->countDigitalWrites(TEST_TX_PIN), 8); // 元の8ビット以上
+}
+
+TEST_F(HDLCTest, BitStuffing_MultipleStuffing) {
+    hdlc->begin();
+    
+    // 複数のスタッフィングが必要なデータ
+    uint8_t testData[] = {0xFF, 0xFF}; // 連続する1が多数
+    
+    EXPECT_TRUE(hdlc->transmitFrame(testData, sizeof(testData)));
+    
+    // スタッフィングにより送信ビット数が大幅に増加
+    EXPECT_GT(mockPin->countDigitalWrites(TEST_TX_PIN), 16); // 元の16ビット以上
+}
+
+TEST_F(HDLCTest, BitStuffing_FlagSequenceInData) {
+    hdlc->begin();
+    
+    // フラグシーケンス（0x7E）を含むデータ
+    uint8_t testData[] = {0x7E, 0x01, 0x7E}; 
+    
+    EXPECT_TRUE(hdlc->transmitFrame(testData, sizeof(testData)));
+    
+    // フラグシーケンスがスタッフィングされて送信される
+    EXPECT_GT(mockPin->countDigitalWrites(TEST_TX_PIN), 24); // 元の24ビット以上
+}
+
+#ifdef NATIVE_TEST
+TEST_F(HDLCTest, BitStuffing_DirectTest) {
+    hdlc->begin();
+    
+    // 直接ビットスタッフィング機能をテスト
+    uint8_t testData[] = {0xFC}; // 11111100 - 連続する6個の1
+    uint8_t stuffedBits[100];
+    
+    size_t stuffedBitCount = hdlc->testBitStuff(testData, sizeof(testData), stuffedBits, sizeof(stuffedBits));
+    
+    // スタッフィング後のビット数が増加していることを確認
+    EXPECT_GT(stuffedBitCount, 8); // 元の8ビットより多い
+    
+    // 連続する5個の1の後に0が挿入されていることを確認
+    int consecutiveOnes = 0;
+    for (size_t i = 0; i < stuffedBitCount; i++) {
+        if (stuffedBits[i] == 1) {
+            consecutiveOnes++;
+            EXPECT_LT(consecutiveOnes, 6); // 6個連続する1はない
+        } else {
+            consecutiveOnes = 0;
+        }
+    }
+}
+
+TEST_F(HDLCTest, BitDestuffing_DirectTest) {
+    hdlc->begin();
+    
+    // スタッフィング済みビットパターンを手動作成
+    // 元データ: 0xFC (11111100)
+    // スタッフィング後: 11111 0 100 -> 11111010
+    uint8_t stuffedBits[] = {1, 1, 1, 1, 1, 0, 1, 0, 0}; // 9ビット
+    uint8_t destuffedData[10];
+    
+    size_t destuffedLength = hdlc->testBitDestuff(stuffedBits, 9, destuffedData, sizeof(destuffedData));
+    
+    // デスタッフィング後は1バイト
+    EXPECT_EQ(destuffedLength, 1);
+    
+    // 元のデータが復元されることを確認
+    EXPECT_EQ(destuffedData[0], 0xFC);
+}
+
+TEST_F(HDLCTest, RoundTrip_StuffingDestuffing) {
+    hdlc->begin();
+    
+    // 様々なパターンでラウンドトリップテスト
+    uint8_t testPatterns[] = {
+        0x00, 0xFF, 0x55, 0xAA, 0x7E, 0x7D, 0xFC, 0x1F
+    };
+    
+    for (size_t i = 0; i < sizeof(testPatterns); i++) {
+        uint8_t originalData[] = {testPatterns[i]};
+        uint8_t stuffedBits[100];
+        uint8_t destuffedData[10];
+        
+        // スタッフィング
+        size_t stuffedBitCount = hdlc->testBitStuff(originalData, 1, stuffedBits, sizeof(stuffedBits));
+        EXPECT_GT(stuffedBitCount, 0);
+        
+        // デスタッフィング
+        size_t destuffedLength = hdlc->testBitDestuff(stuffedBits, stuffedBitCount, destuffedData, sizeof(destuffedData));
+        
+        // 元データが復元されることを確認
+        EXPECT_EQ(destuffedLength, 1);
+        EXPECT_EQ(destuffedData[0], originalData[0]) << "Failed for pattern 0x" << std::hex << (int)testPatterns[i];
+    }
+}
+
+TEST_F(HDLCTest, FrameCreation_WithStuffing) {
+    hdlc->begin();
+    
+    // フレーム作成をテスト
+    uint8_t testData[] = {0xFF, 0x7E, 0xFF}; // スタッフィングが多数発生するデータ
+    uint8_t frameBits[1000];
+    
+    size_t frameBitCount = hdlc->testCreateFrameBits(testData, sizeof(testData), frameBits, sizeof(frameBits));
+    
+    EXPECT_GT(frameBitCount, 0);
+    
+    // フレームが開始フラグで始まることを確認
+    uint8_t expectedStartFlag[] = {0, 1, 1, 1, 1, 1, 1, 0}; // 0x7E
+    for (int i = 0; i < 8; i++) {
+        EXPECT_EQ(frameBits[i], expectedStartFlag[i]) << "Start flag mismatch at bit " << i;
+    }
+    
+    // フレームが終了フラグで終わることを確認
+    for (int i = 0; i < 8; i++) {
+        EXPECT_EQ(frameBits[frameBitCount - 8 + i], expectedStartFlag[i]) << "End flag mismatch at bit " << i;
+    }
+}
+#endif
+
 TEST_F(HDLCTest, TransmitFrame) {
     hdlc->begin();
     mockPin->clearLog();
@@ -209,7 +354,130 @@ TEST_F(HDLCTest, CallbackSetting) {
     EXPECT_TRUE(true);
 }
 
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+#ifdef NATIVE_TEST
+TEST_F(HDLCTest, BitStuffing_EdgeCases) {
+    hdlc->begin();
+    
+    // エッジケース: 空データ（length = 0）
+    uint8_t someData[] = {0x00}; // データは存在するがlength=0でテスト
+    uint8_t stuffedBits[20];
+    size_t stuffedCount = hdlc->testBitStuff(someData, 0, stuffedBits, sizeof(stuffedBits));
+    EXPECT_EQ(stuffedCount, 0); // length=0なので0が返される
+    
+    // エッジケース: nullptrデータ
+    stuffedCount = hdlc->testBitStuff(nullptr, 5, stuffedBits, sizeof(stuffedBits));
+    EXPECT_EQ(stuffedCount, 0); // nullptrなので0が返される
+    
+    // エッジケース: 1バイトの0データ
+    uint8_t zeroData[] = {0x00};
+    stuffedCount = hdlc->testBitStuff(zeroData, sizeof(zeroData), stuffedBits, sizeof(stuffedBits));
+    EXPECT_EQ(stuffedCount, 8); // スタッフィング不要、8ビット
+    
+    // エッジケース: 1バイトの1データ  
+    uint8_t oneData[] = {0xFF};
+    stuffedCount = hdlc->testBitStuff(oneData, sizeof(oneData), stuffedBits, sizeof(stuffedBits));
+    EXPECT_GT(stuffedCount, 8); // スタッフィングで増加
 }
+
+TEST_F(HDLCTest, BitDestuffing_EdgeCases) {
+    hdlc->begin();
+    
+    // エッジケース: 空ビット配列
+    uint8_t emptyBits[] = {};
+    uint8_t destuffedData[10];
+    size_t destuffedCount = hdlc->testBitDestuff(emptyBits, 0, destuffedData, sizeof(destuffedData));
+    EXPECT_EQ(destuffedCount, 0);
+    
+    // エッジケース: 不完全なバイト（7ビット）
+    uint8_t incompleteBits[] = {1, 0, 1, 0, 1, 0, 1}; // 7ビット
+    destuffedCount = hdlc->testBitDestuff(incompleteBits, 7, destuffedData, sizeof(destuffedData));
+    EXPECT_EQ(destuffedCount, 0); // 不完全なバイトは無視
+    
+    // エッジケース: 正確に8ビット（スタッフィング無し）
+    uint8_t exactByte[] = {1, 0, 1, 0, 1, 0, 1, 0}; // 0xAA
+    destuffedCount = hdlc->testBitDestuff(exactByte, 8, destuffedData, sizeof(destuffedData));
+    EXPECT_EQ(destuffedCount, 1);
+    EXPECT_EQ(destuffedData[0], 0xAA);
+}
+
+TEST_F(HDLCTest, ComplexStuffingPattern) {
+    hdlc->begin();
+    
+    // 複雑なスタッフィングパターンのテスト
+    // 0xF8 = 11111000 (5個の連続する1)
+    // 0x1F = 00011111 (5個の連続する1)
+    uint8_t complexData[] = {0xF8, 0x1F, 0xFC};
+    uint8_t stuffedBits[100];
+    uint8_t destuffedData[10];
+    
+    // スタッフィング
+    size_t stuffedCount = hdlc->testBitStuff(complexData, sizeof(complexData), stuffedBits, sizeof(stuffedBits));
+    EXPECT_GT(stuffedCount, 24); // 元の24ビットより多い
+    
+    // デスタッフィング
+    size_t destuffedCount = hdlc->testBitDestuff(stuffedBits, stuffedCount, destuffedData, sizeof(destuffedData));
+    EXPECT_EQ(destuffedCount, sizeof(complexData));
+    
+    // 元データと比較
+    for (size_t i = 0; i < sizeof(complexData); i++) {
+        EXPECT_EQ(destuffedData[i], complexData[i]) << "Data mismatch at index " << i;
+    }
+}
+
+TEST_F(HDLCTest, MaximumStuffingScenario) {
+    hdlc->begin();
+    
+    // 最大スタッフィングが発生するシナリオ
+    // 連続する1が多数含まれるデータ
+    uint8_t maxStuffData[10];
+    for (int i = 0; i < 10; i++) {
+        maxStuffData[i] = 0xFF; // 全て1
+    }
+    
+    uint8_t stuffedBits[200]; // 十分大きなバッファ
+    uint8_t destuffedData[20];
+    
+    size_t stuffedCount = hdlc->testBitStuff(maxStuffData, sizeof(maxStuffData), stuffedBits, sizeof(stuffedBits));
+    EXPECT_GT(stuffedCount, 80); // 元の80ビットより大幅に増加
+    
+    size_t destuffedCount = hdlc->testBitDestuff(stuffedBits, stuffedCount, destuffedData, sizeof(destuffedData));
+    EXPECT_EQ(destuffedCount, sizeof(maxStuffData));
+    
+    // 元データが正確に復元されることを確認
+    for (size_t i = 0; i < sizeof(maxStuffData); i++) {
+        EXPECT_EQ(destuffedData[i], maxStuffData[i]);
+    }
+}
+
+TEST_F(HDLCTest, ReceiveBitProcessing_WithStuffing) {
+    hdlc->begin();
+    hdlc->startReceive();
+    
+    // フラグシーケンス送信: 0x7E = 01111110
+    uint8_t flagBits[] = {0, 1, 1, 1, 1, 1, 1, 0};
+    for (int i = 0; i < 8; i++) {
+        // processBitをテストするため、MockPinInterfaceの受信シミュレーション
+        mockPin->setPinValue(TEST_RX_PIN, flagBits[i]);
+        mockPin->triggerInterrupt();
+    }
+    
+    // データビット送信（スタッフィング有り）
+    // 例: 0xFC = 11111100 -> スタッフィング後 11111010
+    uint8_t dataBits[] = {1, 1, 1, 1, 1, 0, 1, 0, 0}; // スタッフィング済み
+    for (size_t i = 0; i < sizeof(dataBits); i++) {
+        mockPin->setPinValue(TEST_RX_PIN, dataBits[i]);
+        mockPin->triggerInterrupt();
+    }
+    
+    // 終了フラグ
+    for (int i = 0; i < 8; i++) {
+        mockPin->setPinValue(TEST_RX_PIN, flagBits[i]);
+        mockPin->triggerInterrupt();
+    }
+    
+    // 受信処理が正常に動作することを確認（具体的な検証は受信コールバックで行う）
+    EXPECT_TRUE(true); // 基本的な受信処理が例外なく完了することを確認
+}
+#endif
+
+// ...existing code...

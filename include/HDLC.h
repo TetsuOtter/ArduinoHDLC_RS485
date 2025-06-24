@@ -109,6 +109,30 @@ public:
      */
     static uint16_t calculateCRC16(const uint8_t* data, size_t length);
 
+    // テスト用public関数
+    #ifdef NATIVE_TEST
+    /**
+     * @brief ビットスタッフィング（テスト用公開）
+     */
+    size_t testBitStuff(const uint8_t* data, size_t length, uint8_t* stuffedBits, size_t maxBits) {
+        return bitStuff(data, length, stuffedBits, maxBits);
+    }
+
+    /**
+     * @brief ビットデスタッフィング（テスト用公開）
+     */
+    size_t testBitDestuff(const uint8_t* stuffedBits, size_t bitCount, uint8_t* destuffedData, size_t maxLength) {
+        return bitDestuff(stuffedBits, bitCount, destuffedData, maxLength);
+    }
+
+    /**
+     * @brief フレーム作成（テスト用公開）
+     */
+    size_t testCreateFrameBits(const uint8_t* data, size_t length, uint8_t* frameBits, size_t maxBits) {
+        return createFrameBits(data, length, frameBits, maxBits);
+    }
+    #endif
+
 private:
     RS485Driver& m_driver;      ///< RS485ドライバの参照
     bool m_initialized;         ///< 初期化フラグ
@@ -125,6 +149,7 @@ private:
     size_t m_receiveIndex;
     uint8_t m_currentByte;
     uint8_t m_bitCount;
+    uint8_t m_consecutiveOnes;  ///< 連続する1ビットのカウント（デスタッフィング用）
     
     FrameReceivedCallback m_receiveCallback; ///< 受信コールバック関数
     
@@ -137,7 +162,27 @@ private:
     } m_frameQueue;
 
     /**
-     * @brief データのバイト・ビット・スタッフィング
+     * @brief ビットスタッフィング（送信用）
+     * @param data 元データ
+     * @param length 元データ長（バイト）
+     * @param stuffedBits スタッフィング後のビット配列
+     * @param maxBits 最大ビット数
+     * @return スタッフィング後のビット数
+     */
+    size_t bitStuff(const uint8_t* data, size_t length, uint8_t* stuffedBits, size_t maxBits);
+
+    /**
+     * @brief ビットデスタッフィング（受信用）
+     * @param stuffedBits スタッフィングされたビット配列
+     * @param bitCount ビット数
+     * @param destuffedData デスタッフィング後のデータ
+     * @param maxLength 最大長
+     * @return デスタッフィング後のデータ長
+     */
+    size_t bitDestuff(const uint8_t* stuffedBits, size_t bitCount, uint8_t* destuffedData, size_t maxLength);
+
+    /**
+     * @brief データのバイト・ビット・スタッフィング（旧実装、削除予定）
      * @param data 元データ
      * @param length 元データ長
      * @param stuffedData スタッフィング後のデータ
@@ -147,7 +192,7 @@ private:
     size_t stuffData(const uint8_t* data, size_t length, uint8_t* stuffedData, size_t maxLength);
 
     /**
-     * @brief データのデスタッフィング
+     * @brief データのデスタッフィング（旧実装、削除予定）
      * @param stuffedData スタッフィングされたデータ
      * @param length データ長
      * @param destuffedData デスタッフィング後のデータ
@@ -157,7 +202,17 @@ private:
     size_t destuffData(const uint8_t* stuffedData, size_t length, uint8_t* destuffedData, size_t maxLength);
 
     /**
-     * @brief HDLCフレームの作成
+     * @brief HDLCフレームの作成（ビットスタッフィング対応）
+     * @param data ペイロードデータ
+     * @param length ペイロード長
+     * @param frameBits 作成されたフレーム（ビット配列）
+     * @param maxBits フレームの最大ビット数
+     * @return フレームのビット数
+     */
+    size_t createFrameBits(const uint8_t* data, size_t length, uint8_t* frameBits, size_t maxBits);
+
+    /**
+     * @brief HDLCフレームの作成（旧実装、削除予定）
      * @param data ペイロードデータ
      * @param length ペイロード長
      * @param frame 作成されたフレーム

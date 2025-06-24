@@ -43,6 +43,7 @@ HDLC::HDLC(RS485Driver& driver)
     , m_receiveIndex(0)
     , m_currentByte(0)
     , m_bitCount(0)
+    , m_consecutiveOnes(0)
     , m_receiveCallback(nullptr)
 {
     s_instance = this;
@@ -73,15 +74,15 @@ bool HDLC::transmitFrame(const uint8_t* data, size_t length) {
         return false;
     }
 
-    uint8_t frame[MAX_FRAME_SIZE];
-    size_t frameLength = createFrame(data, length, frame, MAX_FRAME_SIZE);
+    uint8_t frameBits[MAX_FRAME_SIZE * 10]; // ビットスタッフィングを考慮した最大サイズ
+    size_t frameBitCount = createFrameBits(data, length, frameBits, sizeof(frameBits));
     
-    if (frameLength == 0) {
+    if (frameBitCount == 0) {
         return false;
     }
 
     // フレームをビット単位で送信
-    return m_driver.transmit(frame, frameLength * 8);
+    return m_driver.transmit(frameBits, frameBitCount);
 }
 
 bool HDLC::transmitHexString(const String& hexString) {
@@ -108,6 +109,7 @@ void HDLC::startReceive() {
     m_receiveIndex = 0;
     m_currentByte = 0;
     m_bitCount = 0;
+    m_consecutiveOnes = 0;
     
     m_driver.startReceive();
 }
@@ -300,44 +302,69 @@ void HDLC::bitReceivedCallback(uint8_t bit) {
 }
 
 void HDLC::processBit(uint8_t bit) {
-    // 現在のバイトに新しいビットを追加
-    m_currentByte = (m_currentByte >> 1) | (bit << 7);
-    m_bitCount++;
-    
-    if (m_bitCount == 8) {
-        // 1バイト完了
-        switch (m_receiveState) {
-            case WAITING_FOR_FLAG:
+    switch (m_receiveState) {
+        case WAITING_FOR_FLAG:
+            // フラグシーケンス検出
+            m_currentByte = (m_currentByte >> 1) | (bit << 7);
+            m_bitCount++;
+            
+            if (m_bitCount == 8) {
                 if (m_currentByte == FLAG_SEQUENCE) {
                     m_receiveState = RECEIVING_DATA;
                     m_receiveIndex = 0;
+                    m_consecutiveOnes = 0;
+                    m_bitCount = 0;
+                    m_currentByte = 0;
                 }
-                break;
-                
-            case RECEIVING_DATA:
-                if (m_currentByte == FLAG_SEQUENCE) {
-                    // フレーム終了
-                    processReceivedFrame();
-                    m_receiveState = WAITING_FOR_FLAG;
-                } else if (m_currentByte == ESCAPE_CHAR) {
-                    m_receiveState = ESCAPE_NEXT;
-                } else {
-                    if (m_receiveIndex < MAX_FRAME_SIZE) {
-                        m_receiveBuffer[m_receiveIndex++] = m_currentByte;
+                m_currentByte = 0;
+                m_bitCount = 0;
+            }
+            break;
+            
+        case RECEIVING_DATA:
+            // ビットデスタッフィング処理
+            if (bit == 1) {
+                m_consecutiveOnes++;
+            } else {
+                if (m_consecutiveOnes == 5) {
+                    // スタッフィングされた0ビット - 無視
+                    m_consecutiveOnes = 0;
+                    return;
+                } else if (m_consecutiveOnes == 6) {
+                    // フラグシーケンスの可能性
+                    m_currentByte = (m_currentByte >> 1) | (bit << 7);
+                    m_bitCount++;
+                    
+                    if (m_bitCount == 8 && m_currentByte == FLAG_SEQUENCE) {
+                        // フレーム終了
+                        processReceivedFrame();
+                        m_receiveState = WAITING_FOR_FLAG;
+                        m_consecutiveOnes = 0;
+                        m_bitCount = 0;
+                        m_currentByte = 0;
+                        return;
                     }
                 }
-                break;
-                
-            case ESCAPE_NEXT:
+                m_consecutiveOnes = 0;
+            }
+            
+            // 通常のデータビット処理
+            m_currentByte = (m_currentByte >> 1) | (bit << 7);
+            m_bitCount++;
+            
+            if (m_bitCount == 8) {
+                // 1バイト完了
                 if (m_receiveIndex < MAX_FRAME_SIZE) {
-                    m_receiveBuffer[m_receiveIndex++] = m_currentByte ^ 0x20;
+                    m_receiveBuffer[m_receiveIndex++] = m_currentByte;
                 }
-                m_receiveState = RECEIVING_DATA;
-                break;
-        }
-        
-        m_currentByte = 0;
-        m_bitCount = 0;
+                m_currentByte = 0;
+                m_bitCount = 0;
+            }
+            break;
+            
+        case ESCAPE_NEXT:
+            // 現在は使用しない（ビットスタッフィングで対応）
+            break;
     }
 }
 
@@ -368,4 +395,146 @@ void HDLC::processReceivedFrame() {
             m_frameQueue.hasData = true;
         }
     }
+}
+
+size_t HDLC::bitStuff(const uint8_t* data, size_t length, uint8_t* stuffedBits, size_t maxBits) {
+    if (!data || length == 0 || !stuffedBits || maxBits == 0) {
+        return 0;
+    }
+
+    size_t bitIndex = 0;
+    uint8_t consecutiveOnes = 0;
+
+    for (size_t byteIndex = 0; byteIndex < length; byteIndex++) {
+        uint8_t currentByte = data[byteIndex];
+
+        for (int bitPos = 7; bitPos >= 0; bitPos--) {
+            if (bitIndex >= maxBits) {
+                return 0; // バッファオーバーフロー
+            }
+
+            uint8_t bit = (currentByte >> bitPos) & 1;
+            stuffedBits[bitIndex] = bit;
+            bitIndex++;
+
+            if (bit == 1) {
+                consecutiveOnes++;
+                if (consecutiveOnes == 5) {
+                    // 連続する5個の1の後に0を挿入
+                    if (bitIndex >= maxBits) {
+                        return 0; // バッファオーバーフロー
+                    }
+                    stuffedBits[bitIndex] = 0;
+                    bitIndex++;
+                    consecutiveOnes = 0;
+                }
+            } else {
+                consecutiveOnes = 0;
+            }
+        }
+    }
+
+    return bitIndex;
+}
+
+size_t HDLC::bitDestuff(const uint8_t* stuffedBits, size_t bitCount, uint8_t* destuffedData, size_t maxLength) {
+    if (!stuffedBits || bitCount == 0 || !destuffedData || maxLength == 0) {
+        return 0;
+    }
+
+    size_t destuffedBits = 0;
+    uint8_t consecutiveOnes = 0;
+    uint8_t currentByte = 0;
+    int8_t bitPosition = 7; // int8_tに変更
+    size_t byteIndex = 0;
+
+    for (size_t i = 0; i < bitCount; i++) {
+        uint8_t bit = stuffedBits[i];
+
+        if (bit == 1) {
+            consecutiveOnes++;
+        } else {
+            if (consecutiveOnes == 5) {
+                // スタッフィングされた0ビットなので無視
+                consecutiveOnes = 0;
+                continue;
+            }
+            consecutiveOnes = 0;
+        }
+
+        // 通常のデータビット
+        if (bit == 1) {
+            currentByte |= (1 << bitPosition);
+        }
+
+        bitPosition--;
+        destuffedBits++;
+
+        if (bitPosition < 0) {
+            // 1バイト完成
+            if (byteIndex >= maxLength) {
+                return 0; // バッファオーバーフロー
+            }
+            destuffedData[byteIndex++] = currentByte;
+            currentByte = 0;
+            bitPosition = 7;
+        }
+    }
+
+    // 最後の不完全なバイトがある場合は処理しない
+    return byteIndex;
+}
+
+size_t HDLC::createFrameBits(const uint8_t* data, size_t length, uint8_t* frameBits, size_t maxBits) {
+    if (!data || length == 0 || !frameBits || maxBits < 32) { // 最小フレーム長チェック
+        return 0;
+    }
+
+    // CRC計算
+    uint16_t crc = calculateCRC16(data, length);
+
+    // フレーム構築用の一時バッファ
+    uint8_t tempFrame[MAX_FRAME_SIZE];
+    size_t tempIndex = 0;
+
+    // ペイロード + CRC
+    if (tempIndex + length + 2 > MAX_FRAME_SIZE) {
+        return 0;
+    }
+
+    memcpy(tempFrame + tempIndex, data, length);
+    tempIndex += length;
+
+    // CRC追加（リトルエンディアン）
+    tempFrame[tempIndex++] = crc & 0xFF;
+    tempFrame[tempIndex++] = (crc >> 8) & 0xFF;
+
+    // ビットスタッフィング
+    uint8_t stuffedBits[MAX_FRAME_SIZE * 10]; // 最大拡張を考慮
+    size_t stuffedBitCount = bitStuff(tempFrame, tempIndex, stuffedBits, sizeof(stuffedBits));
+
+    if (stuffedBitCount == 0) {
+        return 0;
+    }
+
+    // フラグシーケンス（開始）
+    size_t frameIndex = 0;
+    uint8_t flagBits[] = {0, 1, 1, 1, 1, 1, 1, 0}; // 0x7E
+
+    // 開始フラグ
+    if (frameIndex + 8 > maxBits) return 0;
+    memcpy(frameBits + frameIndex, flagBits, 8);
+    frameIndex += 8;
+
+    // スタッフィング済みデータ
+    if (frameIndex + stuffedBitCount > maxBits) return 0;
+    memcpy(frameBits + frameIndex, stuffedBits, stuffedBitCount);
+    frameIndex += stuffedBitCount;
+
+    // 終了フラグ
+    if (frameIndex + 8 > maxBits) return 0;
+    memcpy(frameBits + frameIndex, flagBits, 8);
+    frameIndex += 8;
+
+    return frameIndex;
 }
