@@ -1,3 +1,7 @@
+.pio
+.vscode/*
+!.vscode/extensions.json
+
 # Prerequisites
 *.d
 
