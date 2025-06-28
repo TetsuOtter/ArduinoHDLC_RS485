@@ -101,17 +101,17 @@ public:
     /**
      * @brief ビットデスタッフィング（テスト用公開）
      */
-    size_t testBitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
+    size_t testBitDestuff(const uint8_t *stuffedBytes, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
     {
-        return _bitDestuff(stuffedBits, bitCount, destuffedData, maxLength);
+        return _bitDestuff(stuffedBytes, bitCount, destuffedData, maxLength);
     }
 
     /**
      * @brief フレーム作成（テスト用公開）
      */
-    size_t testCreateFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)
+    size_t testCreateFrameBits(const uint8_t *data, size_t length, uint8_t *frameBytes, size_t maxBits)
     {
-        return _createFrameBits(data, length, frameBits, maxBits);
+        return _createFrameBits(data, length, frameBytes, maxBits);
     }
 #endif
 
@@ -141,7 +141,7 @@ private:
      * @brief ビットスタッフィング（送信用）
      * @param data 元データ
      * @param length 元データ長（バイト）
-     * @param stuffedBits スタッフィング後のビット配列
+     * @param stuffedBits スタッフィング後のバイト配列（効率的にパッキング）
      * @param maxBits 最大ビット数
      * @return スタッフィング後のビット数
      */
@@ -149,13 +149,30 @@ private:
 
     /**
      * @brief ビットデスタッフィング（受信用）
-     * @param stuffedBits スタッフィング済みビット配列
+     * @param stuffedBytes スタッフィング済みバイト配列
      * @param bitCount ビット数
      * @param destuffedData デスタッフィング後のデータ
      * @param maxLength 最大データ長（バイト）
      * @return デスタッフィング後のデータ長（バイト）
      */
-    size_t _bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength);
+    size_t _bitDestuff(const uint8_t *stuffedBytes, size_t bitCount, uint8_t *destuffedData, size_t maxLength);
+
+    /**
+     * @brief バイトバッファに1ビットを書き込み
+     * @param buffer 書き込み先バッファ
+     * @param bitIndex ビット位置
+     * @param bit 書き込むビット値
+     */
+    void _writeBitToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t bit);
+
+    /**
+     * @brief バイトバッファに複数ビットを書き込み
+     * @param buffer 書き込み先バッファ
+     * @param bitIndex 開始ビット位置
+     * @param value 書き込む値
+     * @param numBits ビット数
+     */
+    void _writeBitsToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t value, size_t numBits);
 
     /**
      * @brief HDLCフレームの作成（ビットスタッフィング対応）

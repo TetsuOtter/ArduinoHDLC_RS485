@@ -62,15 +62,6 @@ public:
     bool transmit(const uint8_t *data, size_t bitLength);
 
     /**
-     * @brief データの受信（ポーリングベース）
-     * @param buffer 受信データを格納するバッファ
-     * @param maxBits 受信可能な最大ビット数
-     * @param timeoutMs タイムアウト時間（ミリ秒）
-     * @return 受信したビット数（0の場合はタイムアウトまたはエラー）
-     */
-    size_t read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs = 1000);
-
-    /**
      * @brief 現在の受信ピンのビット状態を読み取り
      * @return 現在のビット状態 (0 or 1)
      */

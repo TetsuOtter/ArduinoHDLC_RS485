@@ -7,13 +7,11 @@
 #include "ArduinoPinInterface.h"
 
 #ifdef ARDUINO_AVR_UNO
-#define LED_PIN 13
 #define RS485_TX_PIN 2
 #define RS485_RX_PIN 5
 #define RS485_DE_PIN 3
 #define RS485_RE_PIN 4
 #else
-#define LED_PIN D10
 #define RS485_TX_PIN D2
 #define RS485_RX_PIN D5
 #define RS485_DE_PIN D3
@@ -143,14 +141,9 @@ void setup()
 {
     // シリアル通信の初期化
     Serial.begin(115200);
-    pinMode(LED_PIN, OUTPUT);
-    bool ledState = false;
     while (!Serial)
     {
         // シリアルポートが接続されるまで待機
-        ledState = !ledState;
-        digitalWrite(LED_PIN, ledState ? HIGH : LOW);
-        delay(500);
     }
 
     Serial.println("Initializing Arduino HDLC RS485 Communication...");
