@@ -23,14 +23,6 @@ class HDLC
 {
 public:
     /**
-     * @brief 受信完了コールバック関数の型定義
-     * @param data 受信したデータ
-     * @param length データ長
-     * @param isValid CRCチェックの結果
-     */
-    typedef void (*FrameReceivedCallback)(const uint8_t *data, size_t length, bool isValid);
-
-    /**
      * @brief HDLCフレームの最大サイズ
      */
     static const size_t MAX_FRAME_SIZE = 256;
@@ -161,6 +153,16 @@ private:
     size_t _bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits);
 
     /**
+     * @brief ビットデスタッフィング（受信用）
+     * @param stuffedBits スタッフィング済みビット配列
+     * @param bitCount ビット数
+     * @param destuffedData デスタッフィング後のデータ
+     * @param maxLength 最大データ長（バイト）
+     * @return デスタッフィング後のデータ長（バイト）
+     */
+    size_t _bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength);
+
+    /**
      * @brief HDLCフレームの作成（ビットスタッフィング対応）
      * @param data ペイロードデータ
      * @param length ペイロード長
@@ -197,11 +199,6 @@ private:
      * @brief 受信フレームの処理
      */
     void _processReceivedFrame();
-
-    /**
-     * @brief 受信停止（内部使用）
-     */
-    void _stopReceive();
 };
 
 #endif // HDLC_H

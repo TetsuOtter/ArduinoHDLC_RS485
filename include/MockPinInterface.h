@@ -146,6 +146,15 @@ public:
         return m_timeCounter * 10; // 10ms単位で時間が進むとする
     }
 
+    /**
+     * @brief 高精度システム時刻の取得
+     * @return 起動からの経過時間（マイクロ秒）
+     */
+    uint32_t micros() override
+    {
+        return m_timeCounter * 10000; // 10ms単位で時間が進むとする（マイクロ秒換算）
+    }
+
     // テスト用のユーティリティメソッド
 
     /**

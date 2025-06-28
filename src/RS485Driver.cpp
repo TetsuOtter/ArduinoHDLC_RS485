@@ -10,13 +10,8 @@
 #endif
 #ifndef OUTPUT
 #define OUTPUT 1
-void RS485Driver::_transmitBit(uint8_t bit)
-{
-    m_pinInterface.digitalWrite(m_txPin, bit);
-    _bitDelay();
-}
-
-void RS485Driver::_bitDelay() #ifndef INPUT
+#endif
+#ifndef INPUT
 #define INPUT 0
 #endif
 #ifndef CHANGE
@@ -24,10 +19,21 @@ void RS485Driver::_bitDelay() #ifndef INPUT
 #endif
 #endif
 
-    // 静的メンバは不要になったので削除
-
-    RS485Driver::RS485Driver(IPinInterface &pinInterface, uint8_t txPin, uint8_t rxPin, uint8_t dePin, uint8_t rePin, uint32_t baudRate)
-    : m_pinInterface(pinInterface), m_txPin(txPin), m_rxPin(rxPin), m_dePin(dePin), m_rePin(rePin), m_baudRate(baudRate), m_isTransmitting(false), m_initialized(false)
+RS485Driver::RS485Driver(
+    IPinInterface &pinInterface,
+    uint8_t txPin,
+    uint8_t rxPin,
+    uint8_t dePin,
+    uint8_t rePin,
+    uint32_t baudRate)
+    : m_pinInterface(pinInterface),
+      m_txPin(txPin),
+      m_rxPin(rxPin),
+      m_dePin(dePin),
+      m_rePin(rePin),
+      m_baudRate(baudRate),
+      m_isTransmitting(false),
+      m_initialized(false)
 {
 }
 
@@ -151,9 +157,30 @@ void RS485Driver::waitBitTime()
     this->m_pinInterface.delayMicroseconds(delayMicros);
 }
 
+void RS485Driver::waitHalfBitTime()
+{
+    uint32_t delayMicros = (1000000UL / this->m_baudRate) / 2;
+    this->m_pinInterface.delayMicroseconds(delayMicros);
+}
+
+void RS485Driver::waitBitTime(uint32_t elapsedMicros)
+{
+    uint32_t bitTimeMicros = 1000000UL / this->m_baudRate;
+    if (elapsedMicros < bitTimeMicros)
+    {
+        uint32_t remainingMicros = bitTimeMicros - elapsedMicros;
+        this->m_pinInterface.delayMicroseconds(remainingMicros);
+    }
+}
+
 IPinInterface &RS485Driver::getPinInterface()
 {
     return this->m_pinInterface;
+}
+
+uint32_t RS485Driver::getBaudRate() const
+{
+    return this->m_baudRate;
 }
 
 void RS485Driver::enableTransmit()
@@ -178,13 +205,5 @@ bool RS485Driver::isTransmitting() const
 void RS485Driver::_transmitBit(uint8_t bit)
 {
     this->m_pinInterface.digitalWrite(this->m_txPin, bit ? HIGH : LOW);
-    this->_bitDelay();
-}
-
-void RS485Driver::_bitDelay()
-{
-    // ボーレートに基づいた遅延
-    // 1 / baudRate * 1000000 (マイクロ秒)
-    uint32_t delayMicros = 1000000UL / this->m_baudRate;
-    this->m_pinInterface.delayMicroseconds(delayMicros);
+    this->waitBitTime();
 }

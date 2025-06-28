@@ -42,8 +42,15 @@ namespace
 
 // 静的メンバは不要になったので削除
 
-HDLC::HDLC(RS485Driver &driver)
-    : m_driver(driver), m_initialized(false), m_receiveState(WAITING_FOR_FLAG), m_receiveIndex(0), m_currentByte(0), m_bitCount(0), m_consecutiveOnes(0)
+HDLC::HDLC(
+    RS485Driver &driver)
+    : m_driver(driver),
+      m_initialized(false),
+      m_receiveState(WAITING_FOR_FLAG),
+      m_receiveIndex(0),
+      m_currentByte(0),
+      m_bitCount(0),
+      m_consecutiveOnes(0)
 {
     this->m_frameQueue.hasData = false;
     this->m_frameQueue.valid = false;
@@ -99,11 +106,6 @@ bool HDLC::transmitHexString(const String &hexString)
     return this->transmitFrame(buffer, length);
 }
 
-void HDLC::_stopReceive()
-{
-    // ポーリングベースの実装では特に何もしない
-}
-
 bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
 {
     if (!this->m_initialized)
@@ -123,9 +125,10 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
     uint8_t flagBuffer = 0; // フラグシーケンス検出用
     size_t flagBitCount = 0;
     const uint8_t FLAG_SEQUENCE = 0x7E; // 01111110
+    bool inSync = false;
 
-    // フラグシーケンスを待つ
-    while (true)
+    // フラグシーケンスを待つ（高頻度でビット読み取り）
+    while (!inSync)
     {
         // タイムアウトチェック
         if (timeoutMs > 0 && (this->m_driver.getPinInterface().millis() - startTime) > timeoutMs)
@@ -133,8 +136,10 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
             return false;
         }
 
-        // 1ビット読み取り
+        // 高頻度でビット読み取り（同期を取るため）
+        uint32_t bitStartTime = this->m_driver.getPinInterface().micros();
         uint8_t bit = this->m_driver.readBit();
+        uint32_t bitReadTime = this->m_driver.getPinInterface().micros() - bitStartTime;
 
         // フラグシーケンス検出のためビットを左シフトして追加
         flagBuffer = (flagBuffer << 1) | bit;
@@ -144,16 +149,23 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         {
             if (flagBuffer == FLAG_SEQUENCE)
             {
-                // フラグシーケンス検出！フレーム開始
+                // フラグシーケンス検出！同期確立
+                inSync = true;
+                // 最初のフラグビット立ち上がり直後は半ビット時間で待機
+                this->m_driver.waitHalfBitTime();
                 break;
             }
         }
 
-        // 次のビットタイミングまで待機
-        this->m_driver.waitBitTime();
+        // 短い間隔で次の読み取りまで待機（通常のビット時間の1/8程度）
+        uint32_t shortDelayMicros = (1000000UL / this->m_driver.getBaudRate()) / 8;
+        if (bitReadTime < shortDelayMicros)
+        {
+            this->m_driver.getPinInterface().delayMicroseconds(shortDelayMicros - bitReadTime);
+        }
     }
 
-    // フレームデータ受信
+    // フレームデータ受信（同期確立後）
     while (true)
     {
         // タイムアウトチェック
@@ -162,8 +174,10 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
             return false;
         }
 
-        // 1ビット読み取り
+        // 1ビット読み取り（時間測定付き）
+        uint32_t bitStartTime = this->m_driver.getPinInterface().micros();
         uint8_t bit = this->m_driver.readBit();
+        uint32_t bitReadTime = this->m_driver.getPinInterface().micros() - bitStartTime;
 
         // HDLCフレーム処理
         this->_processBit(bit);
@@ -182,8 +196,8 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
             break;
         }
 
-        // 次のビットタイミングまで待機
-        this->m_driver.waitBitTime();
+        // 次のビットタイミングまで待機（経過時間を考慮）
+        this->m_driver.waitBitTime(bitReadTime);
     }
 
     return this->m_frameQueue.hasData;
@@ -461,6 +475,64 @@ size_t HDLC::_bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits,
     }
 
     return bitIndex;
+}
+
+size_t HDLC::_bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
+{
+    if (!stuffedBits || bitCount == 0 || !destuffedData || maxLength == 0)
+    {
+        return 0;
+    }
+
+    size_t destuffedBits = 0;
+    uint8_t consecutiveOnes = 0;
+    uint8_t currentByte = 0;
+    int8_t bitPosition = 7; // int8_tに変更
+    size_t byteIndex = 0;
+
+    for (size_t i = 0; i < bitCount; i++)
+    {
+        uint8_t bit = stuffedBits[i];
+
+        if (bit == 1)
+        {
+            consecutiveOnes++;
+        }
+        else
+        {
+            if (consecutiveOnes == 5)
+            {
+                // スタッフィングされた0ビットなので無視
+                consecutiveOnes = 0;
+                continue;
+            }
+            consecutiveOnes = 0;
+        }
+
+        // 通常のデータビット
+        if (bit == 1)
+        {
+            currentByte |= (1 << bitPosition);
+        }
+
+        bitPosition--;
+        destuffedBits++;
+
+        if (bitPosition < 0)
+        {
+            // 1バイト完成
+            if (byteIndex >= maxLength)
+            {
+                return 0; // バッファオーバーフロー
+            }
+            destuffedData[byteIndex++] = currentByte;
+            currentByte = 0;
+            bitPosition = 7;
+        }
+    }
+
+    // 最後の不完全なバイトがある場合は処理しない
+    return byteIndex;
 }
 
 size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)

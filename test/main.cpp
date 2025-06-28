@@ -380,9 +380,6 @@ TEST_F(HDLCTest, CallbackSetting)
 {
     hdlc->begin();
 
-    // コールバック関数の設定
-    hdlc->setReceiveCallback(testFrameCallback);
-
     // コールバック設定自体はエラーにならない
     EXPECT_TRUE(true);
 }

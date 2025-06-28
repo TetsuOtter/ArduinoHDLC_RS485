@@ -83,6 +83,15 @@ public:
     {
         return ::millis();
     }
+
+    /**
+     * @brief 高精度システム時刻の取得
+     * @return 起動からの経過時間（マイクロ秒）
+     */
+    uint32_t micros() override
+    {
+        return ::micros();
+    }
 };
 
 #endif // ARDUINO_PIN_INTERFACE_H

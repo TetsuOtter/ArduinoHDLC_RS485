@@ -63,6 +63,12 @@ public:
      * @return 起動からの経過時間（ミリ秒）
      */
     virtual uint32_t millis() = 0;
+
+    /**
+     * @brief 高精度システム時刻の取得
+     * @return 起動からの経過時間（マイクロ秒）
+     */
+    virtual uint32_t micros() = 0;
 };
 
 #endif // PIN_INTERFACE_H

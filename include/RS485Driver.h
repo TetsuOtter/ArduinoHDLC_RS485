@@ -82,10 +82,27 @@ public:
     void waitBitTime();
 
     /**
+     * @brief ボーレートに基づいて半ビット分の時間待機
+     */
+    void waitHalfBitTime();
+
+    /**
+     * @brief 経過時間を考慮して1ビット分の時間待機
+     * @param elapsedMicros 既に経過した時間（マイクロ秒）
+     */
+    void waitBitTime(uint32_t elapsedMicros);
+
+    /**
      * @brief ピンインターフェースの参照を取得
      * @return ピンインターフェースの参照
      */
     IPinInterface &getPinInterface();
+
+    /**
+     * @brief ボーレートを取得
+     * @return 設定されているボーレート
+     */
+    uint32_t getBaudRate() const;
 
     /**
      * @brief 送信モードに切り替え
@@ -118,11 +135,6 @@ private:
      * @param bit 送信するビット (0 or 1)
      */
     void _transmitBit(uint8_t bit);
-
-    /**
-     * @brief ビット時間の遅延
-     */
-    void _bitDelay();
 };
 
 #endif // RS485DRIVER_H
