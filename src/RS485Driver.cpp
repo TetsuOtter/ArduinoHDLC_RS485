@@ -33,7 +33,9 @@ RS485Driver::RS485Driver(
       m_rePin(rePin),
       m_baudRate(baudRate),
       m_isTransmitting(false),
-      m_initialized(false)
+      m_initialized(false),
+      m_bitTimeMicros(1000000UL / baudRate),
+      m_halfBitTimeMicros((1000000UL / baudRate) / 2)
 {
 }
 
@@ -153,22 +155,19 @@ uint8_t RS485Driver::readBit()
 
 void RS485Driver::waitBitTime()
 {
-    uint32_t delayMicros = 1000000UL / this->m_baudRate;
-    this->m_pinInterface.delayMicroseconds(delayMicros);
+    this->m_pinInterface.delayMicroseconds(this->m_bitTimeMicros);
 }
 
 void RS485Driver::waitHalfBitTime()
 {
-    uint32_t delayMicros = (1000000UL / this->m_baudRate) / 2;
-    this->m_pinInterface.delayMicroseconds(delayMicros);
+    this->m_pinInterface.delayMicroseconds(this->m_halfBitTimeMicros);
 }
 
 void RS485Driver::waitBitTime(uint32_t elapsedMicros)
 {
-    uint32_t bitTimeMicros = 1000000UL / this->m_baudRate;
-    if (elapsedMicros < bitTimeMicros)
+    if (elapsedMicros < this->m_bitTimeMicros)
     {
-        uint32_t remainingMicros = bitTimeMicros - elapsedMicros;
+        uint32_t remainingMicros = this->m_bitTimeMicros - elapsedMicros;
         this->m_pinInterface.delayMicroseconds(remainingMicros);
     }
 }

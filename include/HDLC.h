@@ -119,19 +119,14 @@ private:
     RS485Driver &m_driver; ///< RS485ドライバの参照
     bool m_initialized;    ///< 初期化フラグ
 
-    // 受信状態管理
-    enum ReceiveState
-    {
-        WAITING_FOR_FLAG,
-        RECEIVING_DATA
-    };
-
-    ReceiveState m_receiveState;
     uint8_t m_receiveBuffer[MAX_FRAME_SIZE];
     size_t m_receiveIndex;
     uint8_t m_currentByte;
     uint8_t m_bitCount;
     uint8_t m_consecutiveOnes; ///< 連続する1ビットのカウント（デスタッフィング用）
+
+    // 事前計算された待機時間
+    uint32_t m_shortDelayMicros; ///< フラグ検出時の短い待機時間（1/8ビット時間）
 
     // 受信データキュー (簡易実装)
     struct FrameQueue

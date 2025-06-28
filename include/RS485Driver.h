@@ -130,6 +130,10 @@ private:
     bool m_isTransmitting;         ///< 送信モードフラグ
     bool m_initialized;            ///< 初期化フラグ
 
+    // 事前計算された待機時間
+    uint32_t m_bitTimeMicros;     ///< 1ビット時間（マイクロ秒）
+    uint32_t m_halfBitTimeMicros; ///< 半ビット時間（マイクロ秒）
+
     /**
      * @brief 1ビット送信
      * @param bit 送信するビット (0 or 1)

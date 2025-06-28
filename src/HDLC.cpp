@@ -42,11 +42,35 @@ namespace
 
 // 静的メンバは不要になったので削除
 
+/**
+ * @brief 16進数文字を数値に変換するユーティリティ関数
+ * @param hexChar 16進数文字 ('0'-'9', 'A'-'F', 'a'-'f')
+ * @return 対応する数値 (0-15)、無効な文字の場合は0
+ */
+static uint8_t hexCharToValue(char hexChar)
+{
+    if (hexChar >= '0' && hexChar <= '9')
+    {
+        return hexChar - '0';
+    }
+    else if (hexChar >= 'A' && hexChar <= 'F')
+    {
+        return hexChar - 'A' + 10;
+    }
+    else if (hexChar >= 'a' && hexChar <= 'f')
+    {
+        return hexChar - 'a' + 10;
+    }
+    else
+    {
+        return 0; // 無効な文字
+    }
+}
+
 HDLC::HDLC(
     RS485Driver &driver)
     : m_driver(driver),
       m_initialized(false),
-      m_receiveState(WAITING_FOR_FLAG),
       m_receiveIndex(0),
       m_currentByte(0),
       m_bitCount(0),
@@ -55,6 +79,10 @@ HDLC::HDLC(
     this->m_frameQueue.hasData = false;
     this->m_frameQueue.valid = false;
     this->m_frameQueue.length = 0;
+
+    // 待機時間を事前計算
+    uint32_t baudRate = this->m_driver.getBaudRate();
+    this->m_shortDelayMicros = (1000000UL / baudRate) / 8; // 1/8ビット時間
 }
 
 bool HDLC::begin()
@@ -114,7 +142,6 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
     }
 
     // 受信状態を初期化
-    this->m_receiveState = WAITING_FOR_FLAG;
     this->m_receiveIndex = 0;
     this->m_currentByte = 0;
     this->m_bitCount = 0;
@@ -157,11 +184,10 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
             }
         }
 
-        // 短い間隔で次の読み取りまで待機（通常のビット時間の1/8程度）
-        uint32_t shortDelayMicros = (1000000UL / this->m_driver.getBaudRate()) / 8;
-        if (bitReadTime < shortDelayMicros)
+        // 短い間隔で次の読み取りまで待機（事前計算された1/8ビット時間）
+        if (bitReadTime < this->m_shortDelayMicros)
         {
-            this->m_driver.getPinInterface().delayMicroseconds(shortDelayMicros - bitReadTime);
+            this->m_driver.getPinInterface().delayMicroseconds(this->m_shortDelayMicros - bitReadTime);
         }
     }
 
@@ -190,7 +216,7 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
 
         // フラグシーケンス再検出（フレーム終了）
         flagBuffer = (flagBuffer << 1) | bit;
-        if (flagBuffer == FLAG_SEQUENCE && this->m_receiveState == RECEIVING_DATA)
+        if (flagBuffer == FLAG_SEQUENCE)
         {
             // フレーム終了
             break;
@@ -286,10 +312,8 @@ size_t HDLC::_hexStringToBytes(const String &hexString, uint8_t *buffer, size_t 
 #endif
 
         // 16進数文字を数値に変換
-        uint8_t high = (highChar >= '0' && highChar <= '9') ? (highChar - '0') : (highChar >= 'A' && highChar <= 'F') ? (highChar - 'A' + 10)
-                                                                                                                      : 0;
-        uint8_t low = (lowChar >= '0' && lowChar <= '9') ? (lowChar - '0') : (lowChar >= 'A' && lowChar <= 'F') ? (lowChar - 'A' + 10)
-                                                                                                                : 0;
+        uint8_t high = hexCharToValue(highChar);
+        uint8_t low = hexCharToValue(lowChar);
 
         buffer[i] = (high << 4) | low;
     }
@@ -326,77 +350,51 @@ String HDLC::_bytesToHexString(const uint8_t *data, size_t length)
 
 void HDLC::_processBit(uint8_t bit)
 {
-    switch (this->m_receiveState)
+    // ビットデスタッフィング処理
+    if (bit == 1)
     {
-    case WAITING_FOR_FLAG:
-        // フラグシーケンス検出
-        this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
-        this->m_bitCount++;
-
-        if (this->m_bitCount == 8)
+        this->m_consecutiveOnes++;
+    }
+    else
+    {
+        if (this->m_consecutiveOnes == 5)
         {
-            if (this->m_currentByte == FLAG_SEQUENCE)
+            // スタッフィングされた0ビット - 無視
+            this->m_consecutiveOnes = 0;
+            return;
+        }
+        else if (this->m_consecutiveOnes == 6)
+        {
+            // フラグシーケンスの可能性
+            this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
+            this->m_bitCount++;
+
+            if (this->m_bitCount == 8 && this->m_currentByte == FLAG_SEQUENCE)
             {
-                this->m_receiveState = RECEIVING_DATA;
-                this->m_receiveIndex = 0;
+                // フレーム終了
+                this->_processReceivedFrame();
                 this->m_consecutiveOnes = 0;
                 this->m_bitCount = 0;
                 this->m_currentByte = 0;
-            }
-            this->m_currentByte = 0;
-            this->m_bitCount = 0;
-        }
-        break;
-
-    case RECEIVING_DATA:
-        // ビットデスタッフィング処理
-        if (bit == 1)
-        {
-            this->m_consecutiveOnes++;
-        }
-        else
-        {
-            if (this->m_consecutiveOnes == 5)
-            {
-                // スタッフィングされた0ビット - 無視
-                this->m_consecutiveOnes = 0;
                 return;
             }
-            else if (this->m_consecutiveOnes == 6)
-            {
-                // フラグシーケンスの可能性
-                this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
-                this->m_bitCount++;
-
-                if (this->m_bitCount == 8 && this->m_currentByte == FLAG_SEQUENCE)
-                {
-                    // フレーム終了
-                    this->_processReceivedFrame();
-                    this->m_receiveState = WAITING_FOR_FLAG;
-                    this->m_consecutiveOnes = 0;
-                    this->m_bitCount = 0;
-                    this->m_currentByte = 0;
-                    return;
-                }
-            }
-            this->m_consecutiveOnes = 0;
         }
+        this->m_consecutiveOnes = 0;
+    }
 
-        // 通常のデータビット処理
-        this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
-        this->m_bitCount++;
+    // 通常のデータビット処理
+    this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
+    this->m_bitCount++;
 
-        if (this->m_bitCount == 8)
+    if (this->m_bitCount == 8)
+    {
+        // 1バイト完了
+        if (this->m_receiveIndex < MAX_FRAME_SIZE)
         {
-            // 1バイト完了
-            if (this->m_receiveIndex < MAX_FRAME_SIZE)
-            {
-                this->m_receiveBuffer[this->m_receiveIndex++] = this->m_currentByte;
-            }
-            this->m_currentByte = 0;
-            this->m_bitCount = 0;
+            this->m_receiveBuffer[this->m_receiveIndex++] = this->m_currentByte;
         }
-        break;
+        this->m_currentByte = 0;
+        this->m_bitCount = 0;
     }
 }
 
@@ -484,7 +482,6 @@ size_t HDLC::_bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *d
         return 0;
     }
 
-    size_t destuffedBits = 0;
     uint8_t consecutiveOnes = 0;
     uint8_t currentByte = 0;
     int8_t bitPosition = 7; // int8_tに変更
@@ -516,7 +513,6 @@ size_t HDLC::_bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *d
         }
 
         bitPosition--;
-        destuffedBits++;
 
         if (bitPosition < 0)
         {
