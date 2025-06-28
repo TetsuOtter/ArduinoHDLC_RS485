@@ -87,18 +87,31 @@ HDLC::HDLC(
 
 bool HDLC::begin()
 {
+#ifndef NATIVE_TEST
+    Serial.println("HDLC: Begin init");
+#endif
+
     if (this->m_initialized)
     {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: Already init");
+#endif
         return true;
     }
 
     // RS485Driverの初期化
     if (!this->m_driver.begin())
     {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: Driver init failed");
+#endif
         return false;
     }
 
     this->m_initialized = true;
+#ifndef NATIVE_TEST
+    Serial.println("HDLC: Init OK");
+#endif
     return true;
 }
 
@@ -106,19 +119,42 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
 {
     if (!this->m_initialized || !data || length == 0)
     {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: TX invalid params");
+#endif
         return false;
     }
+
+#ifndef NATIVE_TEST
+    Serial.print("HDLC: TX frame, len=");
+    Serial.println(length);
+#endif
 
     uint8_t frameBits[MAX_FRAME_SIZE * 10]; // ビットスタッフィングを考慮した最大サイズ
     size_t frameBitCount = this->_createFrameBits(data, length, frameBits, sizeof(frameBits));
 
     if (frameBitCount == 0)
     {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: Frame creation failed");
+#endif
         return false;
     }
 
+#ifndef NATIVE_TEST
+    Serial.print("HDLC: Frame bits=");
+    Serial.println(frameBitCount);
+#endif
+
     // フレームをビット単位で送信
-    return this->m_driver.transmit(frameBits, frameBitCount);
+    bool result = this->m_driver.transmit(frameBits, frameBitCount);
+
+#ifndef NATIVE_TEST
+    Serial.print("HDLC: TX result=");
+    Serial.println(result ? "OK" : "FAIL");
+#endif
+
+    return result;
 }
 
 bool HDLC::transmitHexString(const String &hexString)
@@ -138,8 +174,17 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
 {
     if (!this->m_initialized)
     {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: RX not init");
+#endif
         return false;
     }
+
+#ifndef NATIVE_TEST
+    // ログ出力が多いためコメントアウト
+    // Serial.print("HDLC: RX start, timeout=");
+    // Serial.println(timeoutMs);
+#endif
 
     // 受信状態を初期化
     this->m_receiveIndex = 0;
@@ -154,12 +199,21 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
     const uint8_t FLAG_SEQUENCE = 0x7E; // 01111110
     bool inSync = false;
 
+#ifndef NATIVE_TEST
+    // ログ出力が多いためコメントアウト
+    // Serial.println("HDLC: Waiting for flag");
+#endif
+
     // フラグシーケンスを待つ（高頻度でビット読み取り）
     while (!inSync)
     {
         // タイムアウトチェック
         if (timeoutMs > 0 && (this->m_driver.getPinInterface().millis() - startTime) > timeoutMs)
         {
+#ifndef NATIVE_TEST
+            // ログ出力が多いためコメントアウト
+            // Serial.println("HDLC: Flag timeout");
+#endif
             return false;
         }
 
@@ -177,6 +231,9 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
             if (flagBuffer == FLAG_SEQUENCE)
             {
                 // フラグシーケンス検出！同期確立
+#ifndef NATIVE_TEST
+                Serial.println("HDLC: Flag found, sync OK");
+#endif
                 inSync = true;
                 // 最初のフラグビット立ち上がり直後は半ビット時間で待機
                 this->m_driver.waitHalfBitTime();
@@ -191,12 +248,19 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         }
     }
 
+#ifndef NATIVE_TEST
+    Serial.println("HDLC: Reading frame data");
+#endif
+
     // フレームデータ受信（同期確立後）
     while (true)
     {
         // タイムアウトチェック
         if (timeoutMs > 0 && (this->m_driver.getPinInterface().millis() - startTime) > timeoutMs)
         {
+#ifndef NATIVE_TEST
+            Serial.println("HDLC: Frame timeout");
+#endif
             return false;
         }
 
@@ -211,6 +275,12 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         // フレーム受信完了チェック
         if (this->m_frameQueue.hasData)
         {
+#ifndef NATIVE_TEST
+            Serial.print("HDLC: Frame RX OK, len=");
+            Serial.print(this->m_frameQueue.length);
+            Serial.print(" valid=");
+            Serial.println(this->m_frameQueue.valid ? "Y" : "N");
+#endif
             return true;
         }
 
@@ -219,6 +289,9 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         if (flagBuffer == FLAG_SEQUENCE)
         {
             // フレーム終了
+#ifndef NATIVE_TEST
+            Serial.println("HDLC: End flag found");
+#endif
             break;
         }
 
@@ -226,7 +299,12 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         this->m_driver.waitBitTime(bitReadTime);
     }
 
-    return this->m_frameQueue.hasData;
+    bool result = this->m_frameQueue.hasData;
+#ifndef NATIVE_TEST
+    Serial.print("HDLC: RX result=");
+    Serial.println(result ? "OK" : "FAIL");
+#endif
+    return result;
 }
 
 size_t HDLC::readFrame(uint8_t *buffer, size_t bufferSize)

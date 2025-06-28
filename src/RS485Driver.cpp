@@ -41,8 +41,22 @@ RS485Driver::RS485Driver(
 
 bool RS485Driver::begin()
 {
+#ifndef NATIVE_TEST
+    Serial.print("RS485: Init pins TX=");
+    Serial.print(this->m_txPin);
+    Serial.print(" RX=");
+    Serial.print(this->m_rxPin);
+    Serial.print(" DE=");
+    Serial.print(this->m_dePin);
+    Serial.print(" RE=");
+    Serial.println(this->m_rePin);
+#endif
+
     if (this->m_initialized)
     {
+#ifndef NATIVE_TEST
+        Serial.println("RS485: Already init");
+#endif
         return true;
     }
 
@@ -56,6 +70,9 @@ bool RS485Driver::begin()
     this->enableReceive();
 
     this->m_initialized = true;
+#ifndef NATIVE_TEST
+    Serial.println("RS485: Init OK");
+#endif
     return true;
 }
 
@@ -63,8 +80,28 @@ bool RS485Driver::transmit(const uint8_t *data, size_t bitLength)
 {
     if (!this->m_initialized || !data || bitLength == 0)
     {
+#ifndef NATIVE_TEST
+        Serial.println("RS485: TX invalid params");
+#endif
         return false;
     }
+
+#ifndef NATIVE_TEST
+    Serial.print("RS485: TX ");
+    Serial.print(bitLength);
+    Serial.println(" bits");
+    // データも出力
+    Serial.print("Data: ");
+    for (size_t i = 0; i < (bitLength + 7) / 8; i++)
+    {
+        Serial.print(data[i], HEX);
+        if (i < (bitLength + 7) / 8 - 1)
+        {
+            Serial.print(" ");
+        }
+    }
+    Serial.println();
+#endif
 
     // 送信モードに切り替え
     this->enableTransmit();
@@ -82,9 +119,11 @@ bool RS485Driver::transmit(const uint8_t *data, size_t bitLength)
     }
 
     // 送信完了後、受信モードに戻す
-    this->m_pinInterface.delayMicroseconds(100);
     this->enableReceive();
 
+#ifndef NATIVE_TEST
+    Serial.println("RS485: TX done");
+#endif
     return true;
 }
 
@@ -92,8 +131,19 @@ size_t RS485Driver::read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs)
 {
     if (!this->m_initialized || !buffer || maxBits == 0)
     {
+#ifndef NATIVE_TEST
+        Serial.println("RS485: RX invalid params");
+#endif
         return 0;
     }
+
+#ifndef NATIVE_TEST
+    // ログ出力が多くなるため、コメントアウト
+    // Serial.print("RS485: RX start, max=");
+    // Serial.print(maxBits);
+    // Serial.print(" timeout=");
+    // Serial.println(timeoutMs);
+#endif
 
     // 受信モードに設定
     this->enableReceive();
@@ -113,6 +163,10 @@ size_t RS485Driver::read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs)
         // タイムアウトチェック
         if (timeoutMs > 0 && (this->m_pinInterface.millis() - startTime) > timeoutMs)
         {
+#ifndef NATIVE_TEST
+            // ログ出力が多くなるため、コメントアウト
+            // Serial.println("RS485: RX timeout");
+#endif
             break;
         }
 
@@ -133,6 +187,12 @@ size_t RS485Driver::read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs)
         // 次のビットタイミングまで待機
         this->waitBitTime();
     }
+
+#ifndef NATIVE_TEST
+    Serial.print("RS485: RX done, got ");
+    Serial.print(bitsReceived);
+    Serial.println(" bits");
+#endif
 
     return bitsReceived;
 }
@@ -184,6 +244,9 @@ uint32_t RS485Driver::getBaudRate() const
 
 void RS485Driver::enableTransmit()
 {
+#ifndef NATIVE_TEST
+    Serial.println("RS485: Enable TX mode");
+#endif
     this->m_pinInterface.digitalWrite(this->m_dePin, HIGH); // ドライバイネーブル
     this->m_pinInterface.digitalWrite(this->m_rePin, HIGH); // レシーバディスエーブル
     this->m_isTransmitting = true;
@@ -191,6 +254,9 @@ void RS485Driver::enableTransmit()
 
 void RS485Driver::enableReceive()
 {
+#ifndef NATIVE_TEST
+    Serial.println("RS485: Enable RX mode");
+#endif
     this->m_pinInterface.digitalWrite(this->m_dePin, LOW); // ドライバディスエーブル
     this->m_pinInterface.digitalWrite(this->m_rePin, LOW); // レシーバイネーブル
     this->m_isTransmitting = false;
