@@ -10,8 +10,13 @@
 #endif
 #ifndef OUTPUT
 #define OUTPUT 1
-#endif
-#ifndef INPUT
+void RS485Driver::_transmitBit(uint8_t bit)
+{
+    m_pinInterface.digitalWrite(m_txPin, bit);
+    _bitDelay();
+}
+
+void RS485Driver::_bitDelay() #ifndef INPUT
 #define INPUT 0
 #endif
 #ifndef CHANGE
@@ -19,45 +24,45 @@
 #endif
 #endif
 
-// 静的メンバは不要になったので削除
+    // 静的メンバは不要になったので削除
 
-RS485Driver::RS485Driver(IPinInterface &pinInterface, uint8_t txPin, uint8_t rxPin, uint8_t dePin, uint8_t rePin, uint32_t baudRate)
+    RS485Driver::RS485Driver(IPinInterface &pinInterface, uint8_t txPin, uint8_t rxPin, uint8_t dePin, uint8_t rePin, uint32_t baudRate)
     : m_pinInterface(pinInterface), m_txPin(txPin), m_rxPin(rxPin), m_dePin(dePin), m_rePin(rePin), m_baudRate(baudRate), m_isTransmitting(false), m_initialized(false)
 {
 }
 
 bool RS485Driver::begin()
 {
-    if (m_initialized)
+    if (this->m_initialized)
     {
         return true;
     }
 
     // ピンの初期化
-    m_pinInterface.pinMode(m_txPin, OUTPUT);
-    m_pinInterface.pinMode(m_rxPin, INPUT);
-    m_pinInterface.pinMode(m_dePin, OUTPUT);
-    m_pinInterface.pinMode(m_rePin, OUTPUT);
+    this->m_pinInterface.pinMode(this->m_txPin, OUTPUT);
+    this->m_pinInterface.pinMode(this->m_rxPin, INPUT);
+    this->m_pinInterface.pinMode(this->m_dePin, OUTPUT);
+    this->m_pinInterface.pinMode(this->m_rePin, OUTPUT);
 
     // 初期状態は受信モード
-    enableReceive();
+    this->enableReceive();
 
-    m_initialized = true;
+    this->m_initialized = true;
     return true;
 }
 
 bool RS485Driver::transmit(const uint8_t *data, size_t bitLength)
 {
-    if (!m_initialized || !data || bitLength == 0)
+    if (!this->m_initialized || !data || bitLength == 0)
     {
         return false;
     }
 
     // 送信モードに切り替え
-    enableTransmit();
+    this->enableTransmit();
 
     // 少し待機してラインが安定するのを待つ
-    m_pinInterface.delayMicroseconds(100);
+    this->m_pinInterface.delayMicroseconds(100);
 
     // データをビット単位で送信
     for (size_t i = 0; i < bitLength; i++)
@@ -65,109 +70,121 @@ bool RS485Driver::transmit(const uint8_t *data, size_t bitLength)
         size_t byteIndex = i / 8;
         size_t bitIndex = i % 8;
         uint8_t bit = (data[byteIndex] >> (7 - bitIndex)) & 1;
-        transmitBit(bit);
+        this->_transmitBit(bit);
     }
 
     // 送信完了後、受信モードに戻す
-    m_pinInterface.delayMicroseconds(100);
-    enableReceive();
+    this->m_pinInterface.delayMicroseconds(100);
+    this->enableReceive();
 
     return true;
 }
 
 size_t RS485Driver::read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs)
 {
-    if (!m_initialized || !buffer || maxBits == 0)
+    if (!this->m_initialized || !buffer || maxBits == 0)
     {
         return 0;
     }
 
     // 受信モードに設定
-    enableReceive();
+    this->enableReceive();
 
-    uint32_t startTime = m_pinInterface.millis();
+    uint32_t startTime = this->m_pinInterface.millis();
     size_t bitsReceived = 0;
-    uint32_t bitDelay = 1000000UL / m_baudRate; // マイクロ秒単位のビット間隔
 
-    // 最初の状態変化を待つ（フレーム開始の検出）
-    uint8_t currentPinState = m_pinInterface.digitalRead(m_rxPin);
-    uint8_t lastPinState = currentPinState;
+    // バッファを初期化
+    size_t maxBytes = (maxBits + 7) / 8;
+    for (size_t i = 0; i < maxBytes; i++)
+    {
+        buffer[i] = 0;
+    }
 
     while (bitsReceived < maxBits)
     {
         // タイムアウトチェック
-        if (timeoutMs > 0 && (m_pinInterface.millis() - startTime) > timeoutMs)
+        if (timeoutMs > 0 && (this->m_pinInterface.millis() - startTime) > timeoutMs)
         {
             break;
         }
 
-        currentPinState = m_pinInterface.digitalRead(m_rxPin);
+        // 1ビット読み取り
+        uint8_t bit = this->readBit();
 
-        // 状態変化があった場合、ビットタイミングで同期
-        if (currentPinState != lastPinState)
+        // バッファに格納
+        size_t byteIndex = bitsReceived / 8;
+        size_t bitIndex = 7 - (bitsReceived % 8); // MSBファースト
+
+        if (bit)
         {
-            // ビット中央でサンプリングするために半ビット時間待機
-            m_pinInterface.delayMicroseconds(bitDelay / 2);
-
-            // ビットデータを読み取り
-            uint8_t bit = m_pinInterface.digitalRead(m_rxPin) ? 1 : 0;
-
-            // バッファに格納
-            size_t byteIndex = bitsReceived / 8;
-            size_t bitIndex = 7 - (bitsReceived % 8); // MSBファースト
-
-            if (bit)
-            {
-                buffer[byteIndex] |= (1 << bitIndex);
-            }
-            else
-            {
-                buffer[byteIndex] &= ~(1 << bitIndex);
-            }
-
-            bitsReceived++;
-            lastPinState = currentPinState;
-
-            // 次のビットタイミングまで待機
-            m_pinInterface.delayMicroseconds(bitDelay / 2);
+            buffer[byteIndex] |= (1 << bitIndex);
         }
 
-        // 短時間の待機でCPU負荷を軽減
-        m_pinInterface.delayMicroseconds(bitDelay / 10);
+        bitsReceived++;
+
+        // 次のビットタイミングまで待機
+        this->waitBitTime();
     }
 
     return bitsReceived;
 }
 
+uint8_t RS485Driver::readBit()
+{
+    if (!this->m_initialized)
+    {
+        return 0;
+    }
+
+    // 受信モードに設定（必要に応じて）
+    if (this->m_isTransmitting)
+    {
+        this->enableReceive();
+    }
+
+    return this->m_pinInterface.digitalRead(this->m_rxPin) ? 1 : 0;
+}
+
+void RS485Driver::waitBitTime()
+{
+    uint32_t delayMicros = 1000000UL / this->m_baudRate;
+    this->m_pinInterface.delayMicroseconds(delayMicros);
+}
+
+IPinInterface &RS485Driver::getPinInterface()
+{
+    return this->m_pinInterface;
+}
+
 void RS485Driver::enableTransmit()
 {
-    m_pinInterface.digitalWrite(m_dePin, HIGH); // ドライバイネーブル
-    m_pinInterface.digitalWrite(m_rePin, HIGH); // レシーバディスエーブル
-    m_isTransmitting = true;
+    this->m_pinInterface.digitalWrite(this->m_dePin, HIGH); // ドライバイネーブル
+    this->m_pinInterface.digitalWrite(this->m_rePin, HIGH); // レシーバディスエーブル
+    this->m_isTransmitting = true;
 }
 
 void RS485Driver::enableReceive()
 {
-    m_pinInterface.digitalWrite(m_dePin, LOW); // ドライバディスエーブル
-    m_pinInterface.digitalWrite(m_rePin, LOW); // レシーバイネーブル
-    m_isTransmitting = false;
+    this->m_pinInterface.digitalWrite(this->m_dePin, LOW); // ドライバディスエーブル
+    this->m_pinInterface.digitalWrite(this->m_rePin, LOW); // レシーバイネーブル
+    this->m_isTransmitting = false;
 }
 
 bool RS485Driver::isTransmitting() const
 {
-    return m_isTransmitting;
+    return this->m_isTransmitting;
 }
 
-void RS485Driver::transmitBit(uint8_t bit)
+void RS485Driver::_transmitBit(uint8_t bit)
 {
-    m_pinInterface.digitalWrite(m_txPin, bit ? HIGH : LOW);
-    bitDelay();
+    this->m_pinInterface.digitalWrite(this->m_txPin, bit ? HIGH : LOW);
+    this->_bitDelay();
 }
 
-void RS485Driver::bitDelay()
+void RS485Driver::_bitDelay()
 {
     // ボーレートに基づいた遅延
     // 1 / baudRate * 1000000 (マイクロ秒)
-    uint32_t delayMicros = 1000000UL / m_baudRate;
-    m_pinInterface.delayMicroseconds(delayMicros);
+    uint32_t delayMicros = 1000000UL / this->m_baudRate;
+    this->m_pinInterface.delayMicroseconds(delayMicros);
 }

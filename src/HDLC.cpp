@@ -43,39 +43,39 @@ namespace
 // 静的メンバは不要になったので削除
 
 HDLC::HDLC(RS485Driver &driver)
-    : m_driver(driver), m_initialized(false), m_receiveState(WAITING_FOR_FLAG), m_receiveIndex(0), m_currentByte(0), m_bitCount(0), m_consecutiveOnes(0), m_receiveCallback(nullptr)
+    : m_driver(driver), m_initialized(false), m_receiveState(WAITING_FOR_FLAG), m_receiveIndex(0), m_currentByte(0), m_bitCount(0), m_consecutiveOnes(0)
 {
-    m_frameQueue.hasData = false;
-    m_frameQueue.valid = false;
-    m_frameQueue.length = 0;
+    this->m_frameQueue.hasData = false;
+    this->m_frameQueue.valid = false;
+    this->m_frameQueue.length = 0;
 }
 
 bool HDLC::begin()
 {
-    if (m_initialized)
+    if (this->m_initialized)
     {
         return true;
     }
 
     // RS485Driverの初期化
-    if (!m_driver.begin())
+    if (!this->m_driver.begin())
     {
         return false;
     }
 
-    m_initialized = true;
+    this->m_initialized = true;
     return true;
 }
 
 bool HDLC::transmitFrame(const uint8_t *data, size_t length)
 {
-    if (!m_initialized || !data || length == 0)
+    if (!this->m_initialized || !data || length == 0)
     {
         return false;
     }
 
     uint8_t frameBits[MAX_FRAME_SIZE * 10]; // ビットスタッフィングを考慮した最大サイズ
-    size_t frameBitCount = createFrameBits(data, length, frameBits, sizeof(frameBits));
+    size_t frameBitCount = this->_createFrameBits(data, length, frameBits, sizeof(frameBits));
 
     if (frameBitCount == 0)
     {
@@ -83,137 +83,154 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
     }
 
     // フレームをビット単位で送信
-    return m_driver.transmit(frameBits, frameBitCount);
+    return this->m_driver.transmit(frameBits, frameBitCount);
 }
 
 bool HDLC::transmitHexString(const String &hexString)
 {
     uint8_t buffer[MAX_FRAME_SIZE / 2]; // 16進数文字列の場合、バイト数は文字数の半分
-    size_t length = hexStringToBytes(hexString, buffer, sizeof(buffer));
+    size_t length = this->_hexStringToBytes(hexString, buffer, sizeof(buffer));
 
     if (length == 0)
     {
         return false;
     }
 
-    return transmitFrame(buffer, length);
+    return this->transmitFrame(buffer, length);
 }
 
-void HDLC::setReceiveCallback(FrameReceivedCallback callback)
-{
-    m_receiveCallback = callback;
-}
-
-void HDLC::startReceive()
-{
-    if (!m_initialized)
-    {
-        return;
-    }
-
-    m_receiveState = WAITING_FOR_FLAG;
-    m_receiveIndex = 0;
-    m_currentByte = 0;
-    m_bitCount = 0;
-    m_consecutiveOnes = 0;
-
-    // ポーリングベースの実装では特に何もしない
-    // 実際の受信は receiveFrame() で行う
-}
-
-void HDLC::stopReceive()
+void HDLC::_stopReceive()
 {
     // ポーリングベースの実装では特に何もしない
 }
 
-bool HDLC::receiveFrame(uint32_t timeoutMs)
+bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
 {
-    if (!m_initialized)
+    if (!this->m_initialized)
     {
         return false;
     }
 
     // 受信状態を初期化
-    m_receiveState = WAITING_FOR_FLAG;
-    m_receiveIndex = 0;
-    m_currentByte = 0;
-    m_bitCount = 0;
-    m_consecutiveOnes = 0;
-    m_frameQueue.hasData = false;
+    this->m_receiveState = WAITING_FOR_FLAG;
+    this->m_receiveIndex = 0;
+    this->m_currentByte = 0;
+    this->m_bitCount = 0;
+    this->m_consecutiveOnes = 0;
+    this->m_frameQueue.hasData = false;
 
-    // バッファサイズはフレーム最大長の8倍（ビット単位）
-    const size_t maxBits = MAX_FRAME_SIZE * 8;
-    uint8_t rawBuffer[MAX_FRAME_SIZE];
-    memset(rawBuffer, 0, sizeof(rawBuffer));
+    uint32_t startTime = this->m_driver.getPinInterface().millis();
+    uint8_t flagBuffer = 0; // フラグシーケンス検出用
+    size_t flagBitCount = 0;
+    const uint8_t FLAG_SEQUENCE = 0x7E; // 01111110
 
-    // RS485Driverからデータを受信
-    size_t bitsReceived = m_driver.read(rawBuffer, maxBits, timeoutMs);
-    if (bitsReceived == 0)
+    // フラグシーケンスを待つ
+    while (true)
     {
-        return false; // タイムアウトまたはエラー
+        // タイムアウトチェック
+        if (timeoutMs > 0 && (this->m_driver.getPinInterface().millis() - startTime) > timeoutMs)
+        {
+            return false;
+        }
+
+        // 1ビット読み取り
+        uint8_t bit = this->m_driver.readBit();
+
+        // フラグシーケンス検出のためビットを左シフトして追加
+        flagBuffer = (flagBuffer << 1) | bit;
+        flagBitCount++;
+
+        if (flagBitCount >= 8)
+        {
+            if (flagBuffer == FLAG_SEQUENCE)
+            {
+                // フラグシーケンス検出！フレーム開始
+                break;
+            }
+        }
+
+        // 次のビットタイミングまで待機
+        this->m_driver.waitBitTime();
     }
 
-    // 受信したビットをHDLCフレームとして処理
-    for (size_t i = 0; i < bitsReceived; i++)
+    // フレームデータ受信
+    while (true)
     {
-        size_t byteIndex = i / 8;
-        size_t bitIndex = 7 - (i % 8);
-        uint8_t bit = (rawBuffer[byteIndex] >> bitIndex) & 1;
+        // タイムアウトチェック
+        if (timeoutMs > 0 && (this->m_driver.getPinInterface().millis() - startTime) > timeoutMs)
+        {
+            return false;
+        }
 
-        processBit(bit);
+        // 1ビット読み取り
+        uint8_t bit = this->m_driver.readBit();
+
+        // HDLCフレーム処理
+        this->_processBit(bit);
 
         // フレーム受信完了チェック
-        if (m_frameQueue.hasData)
+        if (this->m_frameQueue.hasData)
         {
             return true;
         }
+
+        // フラグシーケンス再検出（フレーム終了）
+        flagBuffer = (flagBuffer << 1) | bit;
+        if (flagBuffer == FLAG_SEQUENCE && this->m_receiveState == RECEIVING_DATA)
+        {
+            // フレーム終了
+            break;
+        }
+
+        // 次のビットタイミングまで待機
+        this->m_driver.waitBitTime();
     }
 
-    return m_frameQueue.hasData;
+    return this->m_frameQueue.hasData;
 }
 
 size_t HDLC::readFrame(uint8_t *buffer, size_t bufferSize)
 {
-    if (!m_frameQueue.hasData || !buffer || bufferSize == 0)
+    if (!this->m_frameQueue.hasData || !buffer || bufferSize == 0)
     {
         return 0;
     }
 
-    size_t copyLength = (m_frameQueue.length < bufferSize) ? m_frameQueue.length : bufferSize;
-    memcpy(buffer, m_frameQueue.data, copyLength);
+    size_t copyLength = (this->m_frameQueue.length < bufferSize) ? this->m_frameQueue.length : bufferSize;
+    memcpy(buffer, this->m_frameQueue.data, copyLength);
 
-    m_frameQueue.hasData = false;
+    this->m_frameQueue.hasData = false;
     return copyLength;
 }
 
 String HDLC::readFrameAsHexString()
 {
-    if (!m_frameQueue.hasData)
+    if (!this->m_frameQueue.hasData)
     {
         return "";
     }
 
-    String result = bytesToHexString(m_frameQueue.data, m_frameQueue.length);
-    m_frameQueue.hasData = false;
+    String result = this->_bytesToHexString(this->m_frameQueue.data, this->m_frameQueue.length);
+    this->m_frameQueue.hasData = false;
     return result;
 }
 
 uint16_t HDLC::calculateCRC16(const uint8_t *data, size_t length)
 {
-    uint16_t crc = 0xFFFF;
+    uint16_t crc = 0xFFFF; // CRC-16-CCITT初期値
 
     for (size_t i = 0; i < length; i++)
     {
-        crc ^= data[i];
+        crc ^= (data[i] << 8); // 上位8ビットにXOR
         for (int j = 0; j < 8; j++)
         {
-            if (crc & 0x0001)
+            if (crc & 0x8000)
             {
-                crc = (crc >> 1) ^ 0xA001; // CRC-16-IBM polynomial
+                crc = (crc << 1) ^ 0x1021; // CRC-16-CCITT polynomial
             }
             else
             {
-                crc >>= 1;
+                crc <<= 1;
             }
         }
     }
@@ -221,97 +238,7 @@ uint16_t HDLC::calculateCRC16(const uint8_t *data, size_t length)
     return crc;
 }
 
-size_t HDLC::stuffData(const uint8_t *data, size_t length, uint8_t *stuffedData, size_t maxLength)
-{
-    size_t stuffedIndex = 0;
-
-    for (size_t i = 0; i < length && stuffedIndex < maxLength - 1; i++)
-    {
-        if (data[i] == FLAG_SEQUENCE || data[i] == ESCAPE_CHAR)
-        {
-            stuffedData[stuffedIndex++] = ESCAPE_CHAR;
-            if (stuffedIndex < maxLength)
-            {
-                stuffedData[stuffedIndex++] = data[i] ^ 0x20;
-            }
-        }
-        else
-        {
-            stuffedData[stuffedIndex++] = data[i];
-        }
-    }
-
-    return stuffedIndex;
-}
-
-size_t HDLC::destuffData(const uint8_t *stuffedData, size_t length, uint8_t *destuffedData, size_t maxLength)
-{
-    size_t destuffedIndex = 0;
-    bool escapeNext = false;
-
-    for (size_t i = 0; i < length && destuffedIndex < maxLength; i++)
-    {
-        if (escapeNext)
-        {
-            destuffedData[destuffedIndex++] = stuffedData[i] ^ 0x20;
-            escapeNext = false;
-        }
-        else if (stuffedData[i] == ESCAPE_CHAR)
-        {
-            escapeNext = true;
-        }
-        else
-        {
-            destuffedData[destuffedIndex++] = stuffedData[i];
-        }
-    }
-
-    return destuffedIndex;
-}
-
-size_t HDLC::createFrame(const uint8_t *data, size_t length, uint8_t *frame, size_t maxFrameLength)
-{
-    if (length + 4 > maxFrameLength)
-    { // データ + CRC(2) + フラグ(2)
-        return 0;
-    }
-
-    size_t frameIndex = 0;
-
-    // 開始フラグ
-    frame[frameIndex++] = FLAG_SEQUENCE;
-
-    // データのスタッフィング
-    uint8_t stuffedData[MAX_FRAME_SIZE];
-    size_t stuffedLength = stuffData(data, length, stuffedData, MAX_FRAME_SIZE - 4);
-
-    // CRC計算
-    uint16_t crc = calculateCRC16(data, length);
-    uint8_t crcBytes[2] = {(uint8_t)(crc & 0xFF), (uint8_t)((crc >> 8) & 0xFF)};
-
-    // CRCもスタッフィング
-    uint8_t stuffedCrc[4];
-    size_t stuffedCrcLength = stuffData(crcBytes, 2, stuffedCrc, 4);
-
-    // スタッフィングされたデータをフレームにコピー
-    if (frameIndex + stuffedLength + stuffedCrcLength + 1 <= maxFrameLength)
-    {
-        memcpy(&frame[frameIndex], stuffedData, stuffedLength);
-        frameIndex += stuffedLength;
-
-        memcpy(&frame[frameIndex], stuffedCrc, stuffedCrcLength);
-        frameIndex += stuffedCrcLength;
-
-        // 終了フラグ
-        frame[frameIndex++] = FLAG_SEQUENCE;
-
-        return frameIndex;
-    }
-
-    return 0;
-}
-
-size_t HDLC::hexStringToBytes(const String &hexString, uint8_t *buffer, size_t maxLength)
+size_t HDLC::_hexStringToBytes(const String &hexString, uint8_t *buffer, size_t maxLength)
 {
     String cleanHex = hexString;
 
@@ -356,7 +283,7 @@ size_t HDLC::hexStringToBytes(const String &hexString, uint8_t *buffer, size_t m
     return byteCount;
 }
 
-String HDLC::bytesToHexString(const uint8_t *data, size_t length)
+String HDLC::_bytesToHexString(const uint8_t *data, size_t length)
 {
     String result = "";
     for (size_t i = 0; i < length; i++)
@@ -383,27 +310,27 @@ String HDLC::bytesToHexString(const uint8_t *data, size_t length)
     return result;
 }
 
-void HDLC::processBit(uint8_t bit)
+void HDLC::_processBit(uint8_t bit)
 {
-    switch (m_receiveState)
+    switch (this->m_receiveState)
     {
     case WAITING_FOR_FLAG:
         // フラグシーケンス検出
-        m_currentByte = (m_currentByte >> 1) | (bit << 7);
-        m_bitCount++;
+        this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
+        this->m_bitCount++;
 
-        if (m_bitCount == 8)
+        if (this->m_bitCount == 8)
         {
-            if (m_currentByte == FLAG_SEQUENCE)
+            if (this->m_currentByte == FLAG_SEQUENCE)
             {
-                m_receiveState = RECEIVING_DATA;
-                m_receiveIndex = 0;
-                m_consecutiveOnes = 0;
-                m_bitCount = 0;
-                m_currentByte = 0;
+                this->m_receiveState = RECEIVING_DATA;
+                this->m_receiveIndex = 0;
+                this->m_consecutiveOnes = 0;
+                this->m_bitCount = 0;
+                this->m_currentByte = 0;
             }
-            m_currentByte = 0;
-            m_bitCount = 0;
+            this->m_currentByte = 0;
+            this->m_bitCount = 0;
         }
         break;
 
@@ -411,94 +338,82 @@ void HDLC::processBit(uint8_t bit)
         // ビットデスタッフィング処理
         if (bit == 1)
         {
-            m_consecutiveOnes++;
+            this->m_consecutiveOnes++;
         }
         else
         {
-            if (m_consecutiveOnes == 5)
+            if (this->m_consecutiveOnes == 5)
             {
                 // スタッフィングされた0ビット - 無視
-                m_consecutiveOnes = 0;
+                this->m_consecutiveOnes = 0;
                 return;
             }
-            else if (m_consecutiveOnes == 6)
+            else if (this->m_consecutiveOnes == 6)
             {
                 // フラグシーケンスの可能性
-                m_currentByte = (m_currentByte >> 1) | (bit << 7);
-                m_bitCount++;
+                this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
+                this->m_bitCount++;
 
-                if (m_bitCount == 8 && m_currentByte == FLAG_SEQUENCE)
+                if (this->m_bitCount == 8 && this->m_currentByte == FLAG_SEQUENCE)
                 {
                     // フレーム終了
-                    processReceivedFrame();
-                    m_receiveState = WAITING_FOR_FLAG;
-                    m_consecutiveOnes = 0;
-                    m_bitCount = 0;
-                    m_currentByte = 0;
+                    this->_processReceivedFrame();
+                    this->m_receiveState = WAITING_FOR_FLAG;
+                    this->m_consecutiveOnes = 0;
+                    this->m_bitCount = 0;
+                    this->m_currentByte = 0;
                     return;
                 }
             }
-            m_consecutiveOnes = 0;
+            this->m_consecutiveOnes = 0;
         }
 
         // 通常のデータビット処理
-        m_currentByte = (m_currentByte >> 1) | (bit << 7);
-        m_bitCount++;
+        this->m_currentByte = (this->m_currentByte >> 1) | (bit << 7);
+        this->m_bitCount++;
 
-        if (m_bitCount == 8)
+        if (this->m_bitCount == 8)
         {
             // 1バイト完了
-            if (m_receiveIndex < MAX_FRAME_SIZE)
+            if (this->m_receiveIndex < MAX_FRAME_SIZE)
             {
-                m_receiveBuffer[m_receiveIndex++] = m_currentByte;
+                this->m_receiveBuffer[this->m_receiveIndex++] = this->m_currentByte;
             }
-            m_currentByte = 0;
-            m_bitCount = 0;
+            this->m_currentByte = 0;
+            this->m_bitCount = 0;
         }
-        break;
-
-    case ESCAPE_NEXT:
-        // 現在は使用しない（ビットスタッフィングで対応）
         break;
     }
 }
 
-void HDLC::processReceivedFrame()
+void HDLC::_processReceivedFrame()
 {
-    if (m_receiveIndex < 2)
+    if (this->m_receiveIndex < 2)
     {
         return; // CRCが含まれていない
     }
 
     // データ部分とCRC部分を分離
-    size_t dataLength = m_receiveIndex - 2;
-    uint8_t receivedCrcLow = m_receiveBuffer[m_receiveIndex - 2];
-    uint8_t receivedCrcHigh = m_receiveBuffer[m_receiveIndex - 1];
+    size_t dataLength = this->m_receiveIndex - 2;
+    uint8_t receivedCrcLow = this->m_receiveBuffer[this->m_receiveIndex - 2];
+    uint8_t receivedCrcHigh = this->m_receiveBuffer[this->m_receiveIndex - 1];
     uint16_t receivedCrc = receivedCrcLow | (receivedCrcHigh << 8);
 
     // CRC検証
-    uint16_t calculatedCrc = calculateCRC16(m_receiveBuffer, dataLength);
+    uint16_t calculatedCrc = calculateCRC16(this->m_receiveBuffer, dataLength);
     bool isValid = (receivedCrc == calculatedCrc);
 
-    // コールバック呼び出しまたはキューに格納
-    if (m_receiveCallback)
+    // キューに格納 (簡易実装では1つのフレームのみ)
+    if (dataLength <= MAX_FRAME_SIZE)
     {
-        m_receiveCallback(m_receiveBuffer, dataLength, isValid);
-    }
-    else
-    {
-        // キューに格納 (簡易実装では1つのフレームのみ)
-        if (dataLength <= MAX_FRAME_SIZE)
-        {
-            memcpy(m_frameQueue.data, m_receiveBuffer, dataLength);
-            m_frameQueue.length = dataLength;
-            m_frameQueue.valid = isValid;
-            m_frameQueue.hasData = true;
-        }
+        memcpy(this->m_frameQueue.data, this->m_receiveBuffer, dataLength);
+        this->m_frameQueue.length = dataLength;
+        this->m_frameQueue.valid = isValid;
+        this->m_frameQueue.hasData = true;
     }
 }
 
-size_t HDLC::bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits)
+size_t HDLC::_bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits)
 {
     if (!data || length == 0 || !stuffedBits || maxBits == 0)
     {
@@ -548,65 +463,7 @@ size_t HDLC::bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, 
     return bitIndex;
 }
 
-size_t HDLC::bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
-{
-    if (!stuffedBits || bitCount == 0 || !destuffedData || maxLength == 0)
-    {
-        return 0;
-    }
-
-    size_t destuffedBits = 0;
-    uint8_t consecutiveOnes = 0;
-    uint8_t currentByte = 0;
-    int8_t bitPosition = 7; // int8_tに変更
-    size_t byteIndex = 0;
-
-    for (size_t i = 0; i < bitCount; i++)
-    {
-        uint8_t bit = stuffedBits[i];
-
-        if (bit == 1)
-        {
-            consecutiveOnes++;
-        }
-        else
-        {
-            if (consecutiveOnes == 5)
-            {
-                // スタッフィングされた0ビットなので無視
-                consecutiveOnes = 0;
-                continue;
-            }
-            consecutiveOnes = 0;
-        }
-
-        // 通常のデータビット
-        if (bit == 1)
-        {
-            currentByte |= (1 << bitPosition);
-        }
-
-        bitPosition--;
-        destuffedBits++;
-
-        if (bitPosition < 0)
-        {
-            // 1バイト完成
-            if (byteIndex >= maxLength)
-            {
-                return 0; // バッファオーバーフロー
-            }
-            destuffedData[byteIndex++] = currentByte;
-            currentByte = 0;
-            bitPosition = 7;
-        }
-    }
-
-    // 最後の不完全なバイトがある場合は処理しない
-    return byteIndex;
-}
-
-size_t HDLC::createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)
+size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)
 {
     if (!data || length == 0 || !frameBits || maxBits < 32)
     { // 最小フレーム長チェック
@@ -635,7 +492,7 @@ size_t HDLC::createFrameBits(const uint8_t *data, size_t length, uint8_t *frameB
 
     // ビットスタッフィング
     uint8_t stuffedBits[MAX_FRAME_SIZE * 10]; // 最大拡張を考慮
-    size_t stuffedBitCount = bitStuff(tempFrame, tempIndex, stuffedBits, sizeof(stuffedBits));
+    size_t stuffedBitCount = this->_bitStuff(tempFrame, tempIndex, stuffedBits, sizeof(stuffedBits));
 
     if (stuffedBitCount == 0)
     {

@@ -151,12 +151,6 @@ void setup()
         }
     }
 
-    // 受信コールバックの設定（互換性のため残す）
-    hdlc.setReceiveCallback(onFrameReceived);
-
-    // 受信開始（ポーリングベースでは特に何もしない）
-    hdlc.startReceive();
-
     // ステータス表示
     printStatus();
 }
@@ -170,7 +164,8 @@ void loop()
     processCommand();
 
     // ポーリングベースでの受信チェック（短いタイムアウトで）
-    if (hdlc.receiveFrame(50))
+    // NRZ方式に対応したビット制御ベースの受信を使用
+    if (hdlc.receiveFrameWithBitControl(50))
     { // 50msタイムアウト
         // 受信完了後、キューからデータを読み出し
         uint8_t buffer[256];

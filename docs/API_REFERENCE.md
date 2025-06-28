@@ -130,8 +130,7 @@ HDLC(RS485Driver& driver)
 - `bool transmitFrame(const uint8_t* data, size_t length)` - フレーム送信
 - `bool transmitHexString(const String& hexString)` - 16 進数文字列送信
 - `void setReceiveCallback(FrameReceivedCallback callback)` - 受信コールバック設定
-- `void startReceive()` - 受信開始
-- `void stopReceive()` - 受信停止
+- `bool receiveFrameWithBitControl(uint32_t timeoutMs = 5000)` - フレーム受信（低レベルビット制御）
 - `size_t readFrame(uint8_t* buffer, size_t bufferSize)` - フレーム読み出し
 - `String readFrameAsHexString()` - 16 進数文字列として読み出し
 - `static uint16_t calculateCRC16(const uint8_t* data, size_t length)` - CRC 計算
@@ -178,7 +177,12 @@ void onFrameReceived(const uint8_t* data, size_t length, bool isValid) {
 void setup() {
     hdlc.begin();
     hdlc.setReceiveCallback(onFrameReceived);
-    hdlc.startReceive();
+}
+
+void loop() {
+    // ポーリングベースで受信を試行
+    hdlc.receiveFrameWithBitControl(100);
+    delay(10);
 }
 ```
 

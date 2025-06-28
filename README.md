@@ -124,7 +124,9 @@ void setup() {
         // 受信処理
     });
 
-    hdlc.startReceive();
+    // ポーリングベースで受信を試行
+    // hdlc.receiveFrameWithBitControl(5000); // タイムアウト: 5秒
+}
 }
 ```
 

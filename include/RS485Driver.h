@@ -37,12 +37,6 @@ class RS485Driver
 {
 public:
     /**
-     * @brief 受信データのコールバック関数の型定義
-     * @param bit 受信したビット (0 or 1)
-     */
-    typedef void (*BitReceivedCallback)(uint8_t bit);
-
-    /**
      * @brief コンストラクタ
      * @param pinInterface ピン操作インターフェース
      * @param txPin 送信ピン
@@ -77,6 +71,23 @@ public:
     size_t read(uint8_t *buffer, size_t maxBits, uint32_t timeoutMs = 1000);
 
     /**
+     * @brief 現在の受信ピンのビット状態を読み取り
+     * @return 現在のビット状態 (0 or 1)
+     */
+    uint8_t readBit();
+
+    /**
+     * @brief ボーレートに基づいて1ビット分の時間待機
+     */
+    void waitBitTime();
+
+    /**
+     * @brief ピンインターフェースの参照を取得
+     * @return ピンインターフェースの参照
+     */
+    IPinInterface &getPinInterface();
+
+    /**
      * @brief 送信モードに切り替え
      */
     void enableTransmit();
@@ -102,30 +113,16 @@ private:
     bool m_isTransmitting;         ///< 送信モードフラグ
     bool m_initialized;            ///< 初期化フラグ
 
-    BitReceivedCallback m_receiveCallback; ///< 受信コールバック関数
-
     /**
      * @brief 1ビット送信
      * @param bit 送信するビット (0 or 1)
      */
-    void transmitBit(uint8_t bit);
+    void _transmitBit(uint8_t bit);
 
     /**
      * @brief ビット時間の遅延
      */
-    void bitDelay();
-
-    /**
-     * @brief 受信割り込みハンドラ (静的関数)
-     */
-    static void receiveInterruptHandler();
-
-    /**
-     * @brief 受信処理 (インスタンスメソッド)
-     */
-    void handleReceive();
-
-    static RS485Driver *s_instance; ///< 割り込みハンドラ用のインスタンス参照
+    void _bitDelay();
 };
 
 #endif // RS485DRIVER_H
