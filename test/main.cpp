@@ -161,7 +161,6 @@ TEST_F(HDLCTest, BitStuffing_NoStuffingRequired)
 
     // スタッフィングが不要なデータ（連続する1が5個未満）
     uint8_t testData[] = {0x55}; // 01010101
-    uint8_t stuffedBits[100];
 
     // ビットスタッフィング処理をテスト（privateメソッドなので、リフレクションを使用するか、publicにする必要がある）
     // 現在はpublicメソッドでテストできる範囲でテスト
@@ -223,7 +222,7 @@ TEST_F(HDLCTest, BitStuffing_DirectTest)
     size_t stuffedBitCount = hdlc->testBitStuff(testData, sizeof(testData), stuffedBits, sizeof(stuffedBits));
 
     // スタッフィング後のビット数が増加していることを確認
-    EXPECT_GT(stuffedBitCount, 8); // 元の8ビットより多い
+    EXPECT_GT(stuffedBitCount, 8u); // 元の8ビットより多い
 
     // 連続する5個の1の後に0が挿入されていることを確認
     int consecutiveOnes = 0;
@@ -254,7 +253,7 @@ TEST_F(HDLCTest, BitDestuffing_DirectTest)
     size_t destuffedLength = hdlc->testBitDestuff(stuffedBits, 9, destuffedData, sizeof(destuffedData));
 
     // デスタッフィング後は1バイト
-    EXPECT_EQ(destuffedLength, 1);
+    EXPECT_EQ(destuffedLength, 1u);
 
     // 元のデータが復元されることを確認
     EXPECT_EQ(destuffedData[0], 0xFC);
@@ -276,13 +275,13 @@ TEST_F(HDLCTest, RoundTrip_StuffingDestuffing)
 
         // スタッフィング
         size_t stuffedBitCount = hdlc->testBitStuff(originalData, 1, stuffedBits, sizeof(stuffedBits));
-        EXPECT_GT(stuffedBitCount, 0);
+        EXPECT_GT(stuffedBitCount, 0u);
 
         // デスタッフィング
         size_t destuffedLength = hdlc->testBitDestuff(stuffedBits, stuffedBitCount, destuffedData, sizeof(destuffedData));
 
         // 元データが復元されることを確認
-        EXPECT_EQ(destuffedLength, 1);
+        EXPECT_EQ(destuffedLength, 1u);
         EXPECT_EQ(destuffedData[0], originalData[0]) << "Failed for pattern 0x" << std::hex << (int)testPatterns[i];
     }
 }
@@ -297,7 +296,7 @@ TEST_F(HDLCTest, FrameCreation_WithStuffing)
 
     size_t frameBitCount = hdlc->testCreateFrameBits(testData, sizeof(testData), frameBits, sizeof(frameBits));
 
-    EXPECT_GT(frameBitCount, 0);
+    EXPECT_GT(frameBitCount, 0u);
 
     // フレームが開始フラグで始まることを確認
     uint8_t expectedStartFlag[] = {0, 1, 1, 1, 1, 1, 1, 0}; // 0x7E
@@ -393,21 +392,21 @@ TEST_F(HDLCTest, BitStuffing_EdgeCases)
     uint8_t someData[] = {0x00}; // データは存在するがlength=0でテスト
     uint8_t stuffedBits[20];
     size_t stuffedCount = hdlc->testBitStuff(someData, 0, stuffedBits, sizeof(stuffedBits));
-    EXPECT_EQ(stuffedCount, 0); // length=0なので0が返される
+    EXPECT_EQ(stuffedCount, 0u); // length=0なので0が返される
 
     // エッジケース: nullptrデータ
     stuffedCount = hdlc->testBitStuff(nullptr, 5, stuffedBits, sizeof(stuffedBits));
-    EXPECT_EQ(stuffedCount, 0); // nullptrなので0が返される
+    EXPECT_EQ(stuffedCount, 0u); // nullptrなので0が返される
 
     // エッジケース: 1バイトの0データ
     uint8_t zeroData[] = {0x00};
     stuffedCount = hdlc->testBitStuff(zeroData, sizeof(zeroData), stuffedBits, sizeof(stuffedBits));
-    EXPECT_EQ(stuffedCount, 8); // スタッフィング不要、8ビット
+    EXPECT_EQ(stuffedCount, 8u); // スタッフィング不要、8ビット
 
     // エッジケース: 1バイトの1データ
     uint8_t oneData[] = {0xFF};
     stuffedCount = hdlc->testBitStuff(oneData, sizeof(oneData), stuffedBits, sizeof(stuffedBits));
-    EXPECT_GT(stuffedCount, 8); // スタッフィングで増加
+    EXPECT_GT(stuffedCount, 8u); // スタッフィングで増加
 }
 
 TEST_F(HDLCTest, BitDestuffing_EdgeCases)
@@ -418,17 +417,17 @@ TEST_F(HDLCTest, BitDestuffing_EdgeCases)
     uint8_t emptyBits[] = {};
     uint8_t destuffedData[10];
     size_t destuffedCount = hdlc->testBitDestuff(emptyBits, 0, destuffedData, sizeof(destuffedData));
-    EXPECT_EQ(destuffedCount, 0);
+    EXPECT_EQ(destuffedCount, 0u);
 
     // エッジケース: 不完全なバイト（7ビット）
     uint8_t incompleteBits[] = {1, 0, 1, 0, 1, 0, 1}; // 7ビット
     destuffedCount = hdlc->testBitDestuff(incompleteBits, 7, destuffedData, sizeof(destuffedData));
-    EXPECT_EQ(destuffedCount, 0); // 不完全なバイトは無視
+    EXPECT_EQ(destuffedCount, 0u); // 不完全なバイトは無視
 
     // エッジケース: 正確に8ビット（スタッフィング無し）
     uint8_t exactByte[] = {1, 0, 1, 0, 1, 0, 1, 0}; // 0xAA
     destuffedCount = hdlc->testBitDestuff(exactByte, 8, destuffedData, sizeof(destuffedData));
-    EXPECT_EQ(destuffedCount, 1);
+    EXPECT_EQ(destuffedCount, 1u);
     EXPECT_EQ(destuffedData[0], 0xAA);
 }
 
@@ -445,7 +444,7 @@ TEST_F(HDLCTest, ComplexStuffingPattern)
 
     // スタッフィング
     size_t stuffedCount = hdlc->testBitStuff(complexData, sizeof(complexData), stuffedBits, sizeof(stuffedBits));
-    EXPECT_GT(stuffedCount, 24); // 元の24ビットより多い
+    EXPECT_GT(stuffedCount, 24u); // 元の24ビットより多い
 
     // デスタッフィング
     size_t destuffedCount = hdlc->testBitDestuff(stuffedBits, stuffedCount, destuffedData, sizeof(destuffedData));
@@ -474,7 +473,7 @@ TEST_F(HDLCTest, MaximumStuffingScenario)
     uint8_t destuffedData[20];
 
     size_t stuffedCount = hdlc->testBitStuff(maxStuffData, sizeof(maxStuffData), stuffedBits, sizeof(stuffedBits));
-    EXPECT_GT(stuffedCount, 80); // 元の80ビットより大幅に増加
+    EXPECT_GT(stuffedCount, 80u); // 元の80ビットより大幅に増加
 
     size_t destuffedCount = hdlc->testBitDestuff(stuffedBits, stuffedCount, destuffedData, sizeof(destuffedData));
     EXPECT_EQ(destuffedCount, sizeof(maxStuffData));
@@ -530,7 +529,7 @@ TEST_F(RS485DriverTest, PollingRead_Timeout)
 
     size_t result = driver->read(buffer, 8, 10); // 10msタイムアウト
     // 新しい実装では、タイムアウト時間内にビットを読み取るため、0以上のビット数が返される
-    EXPECT_LE(result, 8); // 最大8ビットまで
+    EXPECT_LE(result, 8u); // 最大8ビットまで
 }
 
 TEST_F(RS485DriverTest, PollingRead_InvalidParams)
@@ -540,10 +539,10 @@ TEST_F(RS485DriverTest, PollingRead_InvalidParams)
     uint8_t buffer[16];
 
     // nullptrバッファ
-    EXPECT_EQ(0, driver->read(nullptr, 8, 100));
+    EXPECT_EQ(0u, driver->read(nullptr, 8, 100));
 
     // 0ビット長
-    EXPECT_EQ(0, driver->read(buffer, 0, 100));
+    EXPECT_EQ(0u, driver->read(buffer, 0, 100));
 }
 
 TEST_F(RS485DriverTest, ReadBit_Basic)
@@ -552,11 +551,11 @@ TEST_F(RS485DriverTest, ReadBit_Basic)
 
     // RXピンをHIGHに設定
     mockPin->setPinValue(TEST_RX_PIN, HIGH);
-    EXPECT_EQ(1, driver->readBit());
+    EXPECT_EQ(1u, driver->readBit());
 
     // RXピンをLOWに設定
     mockPin->setPinValue(TEST_RX_PIN, LOW);
-    EXPECT_EQ(0, driver->readBit());
+    EXPECT_EQ(0u, driver->readBit());
 }
 
 TEST_F(RS485DriverTest, WaitBitTime_Basic)
