@@ -524,4 +524,47 @@ TEST_F(HDLCTest, ReceiveBitProcessing_WithStuffing)
 }
 #endif
 
-// ...existing code...
+TEST_F(RS485DriverTest, PollingRead_Timeout)
+{
+    driver->begin();
+
+    uint8_t buffer[16];
+    // RXピンは常にLOW（アイドル状態）なので、タイムアウトするはず
+    mockPin->setPinValue(TEST_RX_PIN, LOW);
+
+    size_t result = driver->read(buffer, 8, 10); // 10msタイムアウト
+    EXPECT_EQ(0, result);                        // タイムアウトで0ビット受信
+}
+
+TEST_F(RS485DriverTest, PollingRead_InvalidParams)
+{
+    driver->begin();
+
+    uint8_t buffer[16];
+
+    // nullptrバッファ
+    EXPECT_EQ(0, driver->read(nullptr, 8, 100));
+
+    // 0ビット長
+    EXPECT_EQ(0, driver->read(buffer, 0, 100));
+}
+
+TEST_F(HDLCTest, ReceiveFrame_Timeout)
+{
+    hdlc->begin();
+
+    // RXピンがアイドル状態でタイムアウトするはず
+    mockPin->setPinValue(TEST_RX_PIN, LOW);
+
+    bool result = hdlc->receiveFrame(10); // 10msタイムアウト
+    EXPECT_FALSE(result);                 // タイムアウトでfalse
+}
+
+TEST_F(HDLCTest, ReceiveFrame_PollingBased)
+{
+    hdlc->begin();
+
+    // シンプルなテスト: receiveFrameがタイムアウトなしで呼び出せることを確認
+    bool result = hdlc->receiveFrame(1); // 1msタイムアウト
+    EXPECT_FALSE(result);                // データがないのでfalse
+}

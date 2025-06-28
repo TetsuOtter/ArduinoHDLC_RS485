@@ -151,10 +151,10 @@ void setup()
         }
     }
 
-    // 受信コールバックの設定
+    // 受信コールバックの設定（互換性のため残す）
     hdlc.setReceiveCallback(onFrameReceived);
 
-    // 受信開始
+    // 受信開始（ポーリングベースでは特に何もしない）
     hdlc.startReceive();
 
     // ステータス表示
@@ -168,6 +168,19 @@ void loop()
 
     // コマンド処理
     processCommand();
+
+    // ポーリングベースでの受信チェック（短いタイムアウトで）
+    if (hdlc.receiveFrame(50))
+    { // 50msタイムアウト
+        // 受信完了後、キューからデータを読み出し
+        uint8_t buffer[256];
+        size_t receivedLength = hdlc.readFrame(buffer, sizeof(buffer));
+        if (receivedLength > 0)
+        {
+            // コールバック関数を呼び出し（互換性のため）
+            onFrameReceived(buffer, receivedLength, true); // CRC検証は内部で実施済み
+        }
+    }
 
     // 受信データの確認 (コールバックが設定されていない場合)
     String receivedHex = hdlc.readFrameAsHexString();

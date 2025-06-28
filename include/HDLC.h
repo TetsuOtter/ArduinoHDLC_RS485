@@ -4,8 +4,8 @@
 #ifdef NATIVE_TEST
 // テスト環境用のArduino定数定義
 #include <stdint.h>
-#include <cstddef>  // size_t用
-#include <string>   // std::string用
+#include <cstddef> // size_t用
+#include <string>  // std::string用
 // ArduinoのString型の代替
 using String = std::string;
 #else
@@ -16,10 +16,11 @@ using String = std::string;
 
 /**
  * @brief HDLCプロトコルに基づくデータの送受信を行うクラス
- * 
+ *
  * データのフレーミング、CRC計算、送受信、データ検証を行います。
  */
-class HDLC {
+class HDLC
+{
 public:
     /**
      * @brief 受信完了コールバック関数の型定義
@@ -27,7 +28,7 @@ public:
      * @param length データ長
      * @param isValid CRCチェックの結果
      */
-    typedef void (*FrameReceivedCallback)(const uint8_t* data, size_t length, bool isValid);
+    typedef void (*FrameReceivedCallback)(const uint8_t *data, size_t length, bool isValid);
 
     /**
      * @brief HDLCフレームの最大サイズ
@@ -48,7 +49,7 @@ public:
      * @brief コンストラクタ
      * @param driver RS485Driverのインスタンス
      */
-    HDLC(RS485Driver& driver);
+    HDLC(RS485Driver &driver);
 
     /**
      * @brief 初期化
@@ -62,14 +63,14 @@ public:
      * @param length データ長
      * @return true 送信成功, false 送信失敗
      */
-    bool transmitFrame(const uint8_t* data, size_t length);
+    bool transmitFrame(const uint8_t *data, size_t length);
 
     /**
      * @brief 16進数文字列をバイト配列に変換して送信
      * @param hexString 16進数文字列 (例: "00F0A1")
      * @return true 送信成功, false 送信失敗
      */
-    bool transmitHexString(const String& hexString);
+    bool transmitHexString(const String &hexString);
 
     /**
      * @brief 受信コールバック関数の設定
@@ -88,12 +89,19 @@ public:
     void stopReceive();
 
     /**
+     * @brief フレーム受信（ポーリングベース）
+     * @param timeoutMs タイムアウト時間（ミリ秒）
+     * @return true フレーム受信成功, false タイムアウトまたはエラー
+     */
+    bool receiveFrame(uint32_t timeoutMs = 5000);
+
+    /**
      * @brief 受信データキューから読み出し
      * @param buffer 読み出し先バッファ
      * @param bufferSize バッファサイズ
      * @return 読み出したデータ長 (0の場合はデータなし)
      */
-    size_t readFrame(uint8_t* buffer, size_t bufferSize);
+    size_t readFrame(uint8_t *buffer, size_t bufferSize);
 
     /**
      * @brief 受信データを16進数文字列として取得
@@ -107,54 +115,59 @@ public:
      * @param length データ長
      * @return CRC値
      */
-    static uint16_t calculateCRC16(const uint8_t* data, size_t length);
+    static uint16_t calculateCRC16(const uint8_t *data, size_t length);
 
-    // テスト用public関数
-    #ifdef NATIVE_TEST
+// テスト用public関数
+#ifdef NATIVE_TEST
     /**
      * @brief ビットスタッフィング（テスト用公開）
      */
-    size_t testBitStuff(const uint8_t* data, size_t length, uint8_t* stuffedBits, size_t maxBits) {
+    size_t testBitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits)
+    {
         return bitStuff(data, length, stuffedBits, maxBits);
     }
 
     /**
      * @brief ビットデスタッフィング（テスト用公開）
      */
-    size_t testBitDestuff(const uint8_t* stuffedBits, size_t bitCount, uint8_t* destuffedData, size_t maxLength) {
+    size_t testBitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
+    {
         return bitDestuff(stuffedBits, bitCount, destuffedData, maxLength);
     }
 
     /**
      * @brief フレーム作成（テスト用公開）
      */
-    size_t testCreateFrameBits(const uint8_t* data, size_t length, uint8_t* frameBits, size_t maxBits) {
+    size_t testCreateFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)
+    {
         return createFrameBits(data, length, frameBits, maxBits);
     }
-    #endif
+#endif
 
 private:
-    RS485Driver& m_driver;      ///< RS485ドライバの参照
-    bool m_initialized;         ///< 初期化フラグ
-    
+    RS485Driver &m_driver; ///< RS485ドライバの参照
+    bool m_initialized;    ///< 初期化フラグ
+
     // 受信状態管理
-    enum ReceiveState {
+    enum ReceiveState
+    {
         WAITING_FOR_FLAG,
         RECEIVING_DATA,
         ESCAPE_NEXT
     };
-    
+
     ReceiveState m_receiveState;
     uint8_t m_receiveBuffer[MAX_FRAME_SIZE];
     size_t m_receiveIndex;
     uint8_t m_currentByte;
     uint8_t m_bitCount;
-    uint8_t m_consecutiveOnes;  ///< 連続する1ビットのカウント（デスタッフィング用）
-    
+    uint8_t m_consecutiveOnes; ///< 連続する1ビットのカウント（デスタッフィング用）
+
     FrameReceivedCallback m_receiveCallback; ///< 受信コールバック関数
-    
+
     // 受信データキュー (簡易実装)
-    struct FrameQueue {
+    struct FrameQueue
+    {
         uint8_t data[MAX_FRAME_SIZE];
         size_t length;
         bool valid;
@@ -169,7 +182,7 @@ private:
      * @param maxBits 最大ビット数
      * @return スタッフィング後のビット数
      */
-    size_t bitStuff(const uint8_t* data, size_t length, uint8_t* stuffedBits, size_t maxBits);
+    size_t bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits);
 
     /**
      * @brief ビットデスタッフィング（受信用）
@@ -179,7 +192,7 @@ private:
      * @param maxLength 最大長
      * @return デスタッフィング後のデータ長
      */
-    size_t bitDestuff(const uint8_t* stuffedBits, size_t bitCount, uint8_t* destuffedData, size_t maxLength);
+    size_t bitDestuff(const uint8_t *stuffedBits, size_t bitCount, uint8_t *destuffedData, size_t maxLength);
 
     /**
      * @brief データのバイト・ビット・スタッフィング（旧実装、削除予定）
@@ -189,7 +202,7 @@ private:
      * @param maxLength 最大長
      * @return スタッフィング後のデータ長
      */
-    size_t stuffData(const uint8_t* data, size_t length, uint8_t* stuffedData, size_t maxLength);
+    size_t stuffData(const uint8_t *data, size_t length, uint8_t *stuffedData, size_t maxLength);
 
     /**
      * @brief データのデスタッフィング（旧実装、削除予定）
@@ -199,7 +212,7 @@ private:
      * @param maxLength 最大長
      * @return デスタッフィング後のデータ長
      */
-    size_t destuffData(const uint8_t* stuffedData, size_t length, uint8_t* destuffedData, size_t maxLength);
+    size_t destuffData(const uint8_t *stuffedData, size_t length, uint8_t *destuffedData, size_t maxLength);
 
     /**
      * @brief HDLCフレームの作成（ビットスタッフィング対応）
@@ -209,7 +222,7 @@ private:
      * @param maxBits フレームの最大ビット数
      * @return フレームのビット数
      */
-    size_t createFrameBits(const uint8_t* data, size_t length, uint8_t* frameBits, size_t maxBits);
+    size_t createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits);
 
     /**
      * @brief HDLCフレームの作成（旧実装、削除予定）
@@ -219,7 +232,7 @@ private:
      * @param maxFrameLength フレームの最大長
      * @return フレーム長
      */
-    size_t createFrame(const uint8_t* data, size_t length, uint8_t* frame, size_t maxFrameLength);
+    size_t createFrame(const uint8_t *data, size_t length, uint8_t *frame, size_t maxFrameLength);
 
     /**
      * @brief 16進数文字列をバイト配列に変換
@@ -228,7 +241,7 @@ private:
      * @param maxLength バッファの最大長
      * @return 変換されたバイト数
      */
-    size_t hexStringToBytes(const String& hexString, uint8_t* buffer, size_t maxLength);
+    size_t hexStringToBytes(const String &hexString, uint8_t *buffer, size_t maxLength);
 
     /**
      * @brief バイト配列を16進数文字列に変換
@@ -236,13 +249,7 @@ private:
      * @param length データ長
      * @return 16進数文字列
      */
-    String bytesToHexString(const uint8_t* data, size_t length);
-
-    /**
-     * @brief RS485Driverからの受信ビット処理コールバック
-     * @param bit 受信したビット
-     */
-    static void bitReceivedCallback(uint8_t bit);
+    String bytesToHexString(const uint8_t *data, size_t length);
 
     /**
      * @brief 受信ビットの処理
@@ -254,8 +261,6 @@ private:
      * @brief 受信フレームの処理
      */
     void processReceivedFrame();
-
-    static HDLC* s_instance; ///< コールバック用のインスタンス参照
 };
 
 #endif // HDLC_H

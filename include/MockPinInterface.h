@@ -24,21 +24,32 @@
 
 /**
  * @brief テスト用のモックピンインターフェース
- * 
+ *
  * 物理ピンを使わずにピン操作をシミュレートする。
  * テスト時の状態確認やコールバック呼び出しをサポート。
  */
-class MockPinInterface : public IPinInterface {
+class MockPinInterface : public IPinInterface
+{
 public:
     // ピンの状態を記録する構造体
-    struct PinState {
-        uint8_t mode = 0;     // ピンモード
-        uint8_t value = 0;    // ピンの値
+    struct PinState
+    {
+        uint8_t mode = 0;  // ピンモード
+        uint8_t value = 0; // ピンの値
     };
 
     // ログエントリの構造体
-    struct LogEntry {
-        enum Type { PIN_MODE, DIGITAL_WRITE, DIGITAL_READ, ATTACH_INTERRUPT, DETACH_INTERRUPT, DELAY_MICROS };
+    struct LogEntry
+    {
+        enum Type
+        {
+            PIN_MODE,
+            DIGITAL_WRITE,
+            DIGITAL_READ,
+            ATTACH_INTERRUPT,
+            DETACH_INTERRUPT,
+            DELAY_MICROS
+        };
         Type type;
         uint8_t pin;
         uint8_t value;
@@ -58,8 +69,10 @@ public:
     /**
      * @brief ピンモードの設定
      */
-    void pinMode(uint8_t pin, uint8_t mode) override {
-        if (pin < m_pinStates.size()) {
+    void pinMode(uint8_t pin, uint8_t mode) override
+    {
+        if (pin < m_pinStates.size())
+        {
             m_pinStates[pin].mode = mode;
         }
         m_log.push_back({LogEntry::PIN_MODE, pin, mode, m_timeCounter++});
@@ -68,8 +81,10 @@ public:
     /**
      * @brief デジタルピンへの書き込み
      */
-    void digitalWrite(uint8_t pin, uint8_t value) override {
-        if (pin < m_pinStates.size()) {
+    void digitalWrite(uint8_t pin, uint8_t value) override
+    {
+        if (pin < m_pinStates.size())
+        {
             m_pinStates[pin].value = value;
         }
         m_log.push_back({LogEntry::DIGITAL_WRITE, pin, value, m_timeCounter++});
@@ -78,9 +93,11 @@ public:
     /**
      * @brief デジタルピンからの読み取り
      */
-    uint8_t digitalRead(uint8_t pin) override {
+    uint8_t digitalRead(uint8_t pin) override
+    {
         uint8_t value = 0;
-        if (pin < m_pinStates.size()) {
+        if (pin < m_pinStates.size())
+        {
             value = m_pinStates[pin].value;
         }
         m_log.push_back({LogEntry::DIGITAL_READ, pin, value, m_timeCounter++});
@@ -90,7 +107,8 @@ public:
     /**
      * @brief 割り込みの設定
      */
-    void attachInterrupt(uint8_t interruptNum, void (*callback)(), uint8_t mode) override {
+    void attachInterrupt(uint8_t interruptNum, void (*callback)(), uint8_t mode) override
+    {
         m_currentInterruptNum = interruptNum;
         m_interruptCallback = callback;
         m_log.push_back({LogEntry::ATTACH_INTERRUPT, interruptNum, mode, m_timeCounter++});
@@ -99,8 +117,10 @@ public:
     /**
      * @brief 割り込みの解除
      */
-    void detachInterrupt(uint8_t interruptNum) override {
-        if (m_currentInterruptNum == interruptNum) {
+    void detachInterrupt(uint8_t interruptNum) override
+    {
+        if (m_currentInterruptNum == interruptNum)
+        {
             m_interruptCallback = nullptr;
             m_currentInterruptNum = 255;
         }
@@ -110,10 +130,20 @@ public:
     /**
      * @brief マイクロ秒単位の遅延
      */
-    void delayMicroseconds(uint32_t microseconds) override {
+    void delayMicroseconds(uint32_t microseconds) override
+    {
         (void)microseconds; // 未使用パラメータ警告を回避
         m_log.push_back({LogEntry::DELAY_MICROS, 0, 0, m_timeCounter++});
         // 実際の遅延は行わない（テスト高速化のため）
+    }
+
+    /**
+     * @brief システム時刻の取得
+     * @return 起動からの経過時間（ミリ秒）
+     */
+    uint32_t millis() override
+    {
+        return m_timeCounter * 10; // 10ms単位で時間が進むとする
     }
 
     // テスト用のユーティリティメソッド
@@ -121,8 +151,10 @@ public:
     /**
      * @brief ピンの値を設定（外部からの信号をシミュレート）
      */
-    void setPinValue(uint8_t pin, uint8_t value) {
-        if (pin < m_pinStates.size()) {
+    void setPinValue(uint8_t pin, uint8_t value)
+    {
+        if (pin < m_pinStates.size())
+        {
             m_pinStates[pin].value = value;
         }
     }
@@ -130,8 +162,10 @@ public:
     /**
      * @brief ピンの値を取得
      */
-    uint8_t getPinValue(uint8_t pin) const {
-        if (pin < m_pinStates.size()) {
+    uint8_t getPinValue(uint8_t pin) const
+    {
+        if (pin < m_pinStates.size())
+        {
             return m_pinStates[pin].value;
         }
         return 0;
@@ -140,8 +174,10 @@ public:
     /**
      * @brief ピンモードを取得
      */
-    uint8_t getPinMode(uint8_t pin) const {
-        if (pin < m_pinStates.size()) {
+    uint8_t getPinMode(uint8_t pin) const
+    {
+        if (pin < m_pinStates.size())
+        {
             return m_pinStates[pin].mode;
         }
         return 0;
@@ -150,8 +186,10 @@ public:
     /**
      * @brief 割り込みコールバックを手動で呼び出し
      */
-    void triggerInterrupt() {
-        if (m_interruptCallback) {
+    void triggerInterrupt()
+    {
+        if (m_interruptCallback)
+        {
             m_interruptCallback();
         }
     }
@@ -159,7 +197,8 @@ public:
     /**
      * @brief ログをクリア
      */
-    void clearLog() {
+    void clearLog()
+    {
         m_log.clear();
         m_timeCounter = 0;
     }
@@ -167,25 +206,31 @@ public:
     /**
      * @brief ログエントリ数を取得
      */
-    size_t getLogSize() const {
+    size_t getLogSize() const
+    {
         return m_log.size();
     }
 
     /**
      * @brief ログエントリを取得
      */
-    const LogEntry& getLogEntry(size_t index) const {
+    const LogEntry &getLogEntry(size_t index) const
+    {
         return m_log[index];
     }
 
     /**
      * @brief 特定のピンへの書き込み回数をカウント
      */
-    int countDigitalWrites(uint8_t pin, uint8_t value = 255) const {
+    int countDigitalWrites(uint8_t pin, uint8_t value = 255) const
+    {
         int count = 0;
-        for (const auto& entry : m_log) {
-            if (entry.type == LogEntry::DIGITAL_WRITE && entry.pin == pin) {
-                if (value == 255 || entry.value == value) {
+        for (const auto &entry : m_log)
+        {
+            if (entry.type == LogEntry::DIGITAL_WRITE && entry.pin == pin)
+            {
+                if (value == 255 || entry.value == value)
+                {
                     count++;
                 }
             }
@@ -196,10 +241,13 @@ public:
     /**
      * @brief 遅延呼び出し回数をカウント
      */
-    int countDelays() const {
+    int countDelays() const
+    {
         int count = 0;
-        for (const auto& entry : m_log) {
-            if (entry.type == LogEntry::DELAY_MICROS) {
+        for (const auto &entry : m_log)
+        {
+            if (entry.type == LogEntry::DELAY_MICROS)
+            {
                 count++;
             }
         }

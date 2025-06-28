@@ -3,16 +3,17 @@
 
 #include <stdint.h>
 #ifdef NATIVE_TEST
-#include <cstddef>  // size_t用
+#include <cstddef> // size_t用
 #endif
 
 /**
  * @brief ピン操作のインターフェース
- * 
+ *
  * RS485Driverクラスから物理ピン操作を分離するためのインターフェース。
  * テスト時はモック実装を注入することで単体テストを可能にする。
  */
-class IPinInterface {
+class IPinInterface
+{
 public:
     virtual ~IPinInterface() = default;
 
@@ -56,6 +57,12 @@ public:
      * @param microseconds 遅延時間（マイクロ秒）
      */
     virtual void delayMicroseconds(uint32_t microseconds) = 0;
+
+    /**
+     * @brief システム時刻の取得
+     * @return 起動からの経過時間（ミリ秒）
+     */
+    virtual uint32_t millis() = 0;
 };
 
 #endif // PIN_INTERFACE_H
