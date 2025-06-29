@@ -2,7 +2,6 @@
 
 #ifndef UNIT_TEST
 
-#include "RS485Driver.h"
 #include "HDLC.h"
 #include "ArduinoPinInterface.h"
 
@@ -22,8 +21,7 @@
 
 // グローバルオブジェクト
 ArduinoPinInterface pinInterface;
-RS485Driver rs485Driver(pinInterface, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, RS485_RE_PIN, RS485_BAUD_RATE);
-HDLC hdlc(rs485Driver);
+HDLC hdlc(pinInterface, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, RS485_RE_PIN, RS485_BAUD_RATE);
 
 // 受信データ処理用
 size_t binaryBufferLength = 0;
@@ -144,7 +142,7 @@ void processSerialInput()
 }
 
 /**
- * @brief 受信したコマンドの処理
+ * @brief 受信したコマンドの処理（SNRM→UA待機→Iコマンド送信フロー）
  */
 void processCommand()
 {
@@ -161,8 +159,7 @@ void processCommand()
         return;
     }
 
-    Serial.print("Transmitting: ");
-    // バイナリデータを16進文字列として表示
+    Serial.print("Sending I-frame with data: ");
     for (size_t i = 0; i < binaryBufferLength; i++)
     {
         if (binaryBuffer[i] < 0x10)
@@ -176,17 +173,26 @@ void processCommand()
         }
     }
     Serial.println();
-    Serial.print("Buffer length: ");
-    Serial.println(binaryBufferLength);
 
-    // バイナリデータを直接HDLCで送信
-    if (hdlc.transmitFrame(binaryBuffer, binaryBufferLength))
+    // 1. SNRMコマンド送信とUA応答待機
+    Serial.println("Step 1: Sending SNRM and waiting for UA...");
+    if (!hdlc.sendSNRMAndWaitUA())
     {
-        Serial.println("Transmission successful");
+        Serial.println("ERROR: SNRM/UA handshake failed");
+        binaryBufferLength = 0;
+        return;
+    }
+    Serial.println("SNRM/UA handshake successful");
+
+    // 2. Iコマンドでデータ送信
+    Serial.println("Step 2: Sending I-frame...");
+    if (hdlc.sendICommand(binaryBuffer, binaryBufferLength))
+    {
+        Serial.println("I-frame transmission successful");
     }
     else
     {
-        Serial.println("Transmission failed");
+        Serial.println("I-frame transmission failed");
     }
 
     // バッファをクリア
@@ -198,12 +204,13 @@ void processCommand()
  */
 void printStatus()
 {
-    Serial.println("=== Arduino HDLC RS485 Communication ===");
+    Serial.println("=== Arduino HDLC RS485 Communication (Integrated) ===");
     Serial.println("Usage: Send hex string via Serial (e.g., '01 02 FF')");
+    Serial.println("System automatically sends SNRM before each I-frame");
     Serial.println("System initialized and ready.");
     Serial.print("RS485 Baud Rate: ");
     Serial.println(RS485_BAUD_RATE);
-    Serial.println("Waiting for commands...");
+    Serial.println("Waiting for I-frame data...");
 }
 
 void setup()
