@@ -26,9 +26,36 @@ RS485Driver rs485Driver(pinInterface, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, 
 HDLC hdlc(rs485Driver);
 
 // 受信データ処理用
-size_t serialBufferLength = 0;
-char serialBuffer[128] = {0}; // 明示的にゼロ初期化
+size_t binaryBufferLength = 0;
+uint8_t binaryBuffer[64] = {0}; // バイナリデータ用バッファ（64バイト = 128文字の16進文字列に対応）
+char hexChar = 0;               // 16進文字のペア処理用
+bool hasHexChar = false;
 bool commandReady = false;
+
+/**
+ * @brief 16進数文字を数値に変換するユーティリティ関数
+ * @param hexChar 16進数文字 ('0'-'9', 'A'-'F', 'a'-'f')
+ * @return 対応する数値 (0-15)、無効な文字の場合は255
+ */
+static uint8_t hexCharToValue(char hexChar)
+{
+    if (hexChar >= '0' && hexChar <= '9')
+    {
+        return hexChar - '0';
+    }
+    else if (hexChar >= 'A' && hexChar <= 'F')
+    {
+        return hexChar - 'A' + 10;
+    }
+    else if (hexChar >= 'a' && hexChar <= 'f')
+    {
+        return hexChar - 'a' + 10;
+    }
+    else
+    {
+        return 255; // 無効な文字
+    }
+}
 
 /**
  * @brief HDLC受信フレームのコールバック関数
@@ -66,14 +93,14 @@ void onFrameReceived(const uint8_t *data, size_t length, bool isValid)
 }
 
 /**
- * @brief Serial入力の処理
+ * @brief Serial入力の処理（16進文字列を直接バイナリに変換）
  */
 void processSerialInput()
 {
     while (Serial.available())
     {
         char c = Serial.read();
-        
+
 #if defined(ARDUINO_AVR_LEONARDO)
         // Leonardo用デバッグ：受信文字の確認
         Serial.print("RX: 0x");
@@ -89,22 +116,43 @@ void processSerialInput()
 
         if (c == '\n' || c == '\r')
         {
-            if (serialBufferLength > 0)
+            if (binaryBufferLength > 0)
             {
                 commandReady = true;
-                serialBuffer[serialBufferLength] = '\0';
 #if defined(ARDUINO_AVR_LEONARDO)
                 Serial.print("Leonardo: Command ready, len=");
-                Serial.println(serialBufferLength);
+                Serial.println(binaryBufferLength);
                 Serial.flush();
 #endif
             }
         }
+        else if (c == ' ')
+        {
+            // スペースは無視
+            continue;
+        }
         else
         {
-            if (serialBufferLength < sizeof(serialBuffer) - 1)
+            // 16進文字の処理
+            uint8_t hexValue = hexCharToValue(c);
+            if (hexValue != 255) // 有効な16進文字
             {
-                serialBuffer[serialBufferLength++] = c;
+                if (!hasHexChar)
+                {
+                    // 上位4ビット
+                    hexChar = hexValue << 4;
+                    hasHexChar = true;
+                }
+                else
+                {
+                    // 下位4ビットと結合してバイナリバッファに格納
+                    hexChar |= hexValue;
+                    if (binaryBufferLength < sizeof(binaryBuffer))
+                    {
+                        binaryBuffer[binaryBufferLength++] = hexChar;
+                    }
+                    hasHexChar = false;
+                }
             }
         }
     }
@@ -122,19 +170,32 @@ void processCommand()
 
     commandReady = false;
 
-    if (serialBufferLength == 0)
+    if (binaryBufferLength == 0)
     {
         Serial.println("No command to process.");
         return;
     }
 
     Serial.print("Transmitting: ");
-    Serial.println(serialBuffer);
+    // バイナリデータを16進文字列として表示
+    for (size_t i = 0; i < binaryBufferLength; i++)
+    {
+        if (binaryBuffer[i] < 0x10)
+        {
+            Serial.print("0");
+        }
+        Serial.print(binaryBuffer[i], HEX);
+        if (i < binaryBufferLength - 1)
+        {
+            Serial.print(" ");
+        }
+    }
+    Serial.println();
     Serial.print("Buffer length: ");
-    Serial.println(serialBufferLength);
+    Serial.println(binaryBufferLength);
 
-    // char配列をHDLCで送信
-    if (hdlc.transmitHexString(serialBuffer))
+    // バイナリデータを直接HDLCで送信
+    if (hdlc.transmitFrame(binaryBuffer, binaryBufferLength))
     {
         Serial.println("Transmission successful");
     }
@@ -144,7 +205,7 @@ void processCommand()
     }
 
     // バッファをクリア
-    serialBufferLength = 0;
+    binaryBufferLength = 0;
 }
 
 /**
@@ -164,7 +225,7 @@ void setup()
 {
     // シリアル通信の初期化
     Serial.begin(115200);
-    
+
 #ifdef LED_BUILTIN
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
@@ -186,14 +247,15 @@ void setup()
 #endif
         delay(50); // CPU負荷軽減
     }
-    
+
     // Leonardoのシリアルバッファをクリア
     delay(500); // 追加の安定化時間
-    while (Serial.available() > 0) {
+    while (Serial.available() > 0)
+    {
         Serial.read(); // バッファクリア
     }
     Serial.flush(); // 送信バッファクリア
-    
+
 #else
     // 他のArduino（UNO等）の場合：従来通り
     while (!Serial)
@@ -241,11 +303,12 @@ void setup()
     // ステータス表示
     printStatus();
     Serial.flush(); // 出力完了を確実にする
-    
+
     // Leonardo用：最終的なシリアルバッファクリア
 #if defined(ARDUINO_AVR_LEONARDO)
     delay(200);
-    while (Serial.available() > 0) {
+    while (Serial.available() > 0)
+    {
         Serial.read();
     }
     Serial.println("Leonardo: Ready for input");

@@ -345,16 +345,19 @@ TEST_F(HDLCTest, TransmitInvalidParams)
     EXPECT_FALSE(hdlc->transmitFrame(testData, 0));
 }
 
-TEST_F(HDLCTest, HexStringConversion)
+TEST_F(HDLCTest, FrameTransmission)
 {
     hdlc->begin();
 
-    // 正常な16進数文字列のテスト
-    EXPECT_TRUE(hdlc->transmitHexString("01 02 03 FF"));
-    EXPECT_TRUE(hdlc->transmitHexString("A0B1C2"));
+    // バイナリデータの直接送信テスト
+    uint8_t testData1[] = {0x01, 0x02, 0x03, 0xFF};
+    EXPECT_TRUE(hdlc->transmitFrame(testData1, sizeof(testData1)));
 
-    // 空文字列は失敗する
-    EXPECT_FALSE(hdlc->transmitHexString(""));
+    uint8_t testData2[] = {0xA0, 0xB1, 0xC2};
+    EXPECT_TRUE(hdlc->transmitFrame(testData2, sizeof(testData2)));
+
+    // 空データは失敗する
+    EXPECT_FALSE(hdlc->transmitFrame(nullptr, 0));
 }
 
 TEST_F(HDLCTest, FrameStructure)

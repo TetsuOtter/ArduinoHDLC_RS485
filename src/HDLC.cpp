@@ -1,29 +1,5 @@
 #include "HDLC.h"
-
-/**
- * @brief 16進数文字を数値に変換するユーティリティ関数
- * @param hexChar 16進数文字 ('0'-'9', 'A'-'F', 'a'-'f')
- * @return 対応する数値 (0-15)、無効な文字の場合は0
- */
-static uint8_t hexCharToValue(char hexChar)
-{
-    if (hexChar >= '0' && hexChar <= '9')
-    {
-        return hexChar - '0';
-    }
-    else if (hexChar >= 'A' && hexChar <= 'F')
-    {
-        return hexChar - 'A' + 10;
-    }
-    else if (hexChar >= 'a' && hexChar <= 'f')
-    {
-        return hexChar - 'a' + 10;
-    }
-    else
-    {
-        return 0; // 無効な文字
-    }
-}
+#include <stdlib.h> // malloc, free用
 
 HDLC::HDLC(
     RS485Driver &driver)
@@ -88,14 +64,29 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
     Serial.println(length);
 #endif
 
-    uint8_t frameBuffer[MAX_FRAME_SIZE * 2]; // ビットスタッフィングを考慮
-    size_t frameBitCount = this->_createFrameBits(data, length, frameBuffer, sizeof(frameBuffer) * 8);
+    // 必要なバッファサイズを計算
+    // 最悪の場合: (データ長 + CRC2バイト) * 8ビット * 1.2倍(スタッフィング) + フラグ16ビット
+    size_t maxFrameBits = ((length + 2) * 8 * 12) / 10 + 16; // 1.2倍の計算を整数で行う
+    size_t frameBufferBytes = (maxFrameBits + 7) / 8; // ビットをバイトに変換（切り上げ）
+    
+    // 動的にバッファを確保
+    uint8_t *frameBuffer = (uint8_t*)malloc(frameBufferBytes);
+    if (!frameBuffer)
+    {
+#ifndef NATIVE_TEST
+        Serial.println("HDLC: Memory allocation failed");
+#endif
+        return false;
+    }
+
+    size_t frameBitCount = this->_createFrameBits(data, length, frameBuffer, maxFrameBits);
 
     if (frameBitCount == 0)
     {
 #ifndef NATIVE_TEST
         Serial.println("HDLC: Frame creation failed");
 #endif
+        free(frameBuffer); // メモリを解放
         return false;
     }
 
@@ -113,20 +104,9 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
     Serial.println(result ? "OK" : "FAIL");
 #endif
 
+    // メモリを解放
+    free(frameBuffer);
     return result;
-}
-
-bool HDLC::transmitHexString(const char *hexString)
-{
-    uint8_t buffer[MAX_FRAME_SIZE / 2]; // 16進数文字列の場合、バイト数は文字数の半分
-    size_t length = this->_hexStringToBytes(hexString, buffer, sizeof(buffer));
-
-    if (length == 0)
-    {
-        return false;
-    }
-
-    return this->transmitFrame(buffer, length);
 }
 
 bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
@@ -301,64 +281,6 @@ uint16_t HDLC::calculateCRC16(const uint8_t *data, size_t length)
     }
 
     return crc;
-}
-
-size_t HDLC::_hexStringToBytes(const char *hexString, uint8_t *buffer, size_t maxLength)
-{
-    if (!hexString || !buffer || maxLength == 0)
-    {
-        return 0;
-    }
-
-    // スペースを除去して長さを計算
-    size_t inputLen = strlen(hexString);
-    if (inputLen > 512) // 最大長制限
-    {
-        return 0;
-    }
-
-    size_t cleanLen = 0;
-    char cleanHex[513]; // 最大512文字 + null終端
-
-    for (size_t i = 0; i < inputLen; i++)
-    {
-        char c = hexString[i];
-        if (c != ' ')
-        {
-            // 大文字に変換
-            if (c >= 'a' && c <= 'f')
-            {
-                c = c - 'a' + 'A';
-            }
-            cleanHex[cleanLen++] = c;
-        }
-    }
-    cleanHex[cleanLen] = '\0';
-
-    if (cleanLen % 2 != 0)
-    {
-        return 0; // 奇数文字は無効
-    }
-
-    size_t byteCount = cleanLen / 2;
-    if (byteCount > maxLength)
-    {
-        byteCount = maxLength;
-    }
-
-    for (size_t i = 0; i < byteCount; i++)
-    {
-        char highChar = cleanHex[i * 2];
-        char lowChar = cleanHex[i * 2 + 1];
-
-        // 16進数文字を数値に変換
-        uint8_t high = hexCharToValue(highChar);
-        uint8_t low = hexCharToValue(lowChar);
-
-        buffer[i] = (high << 4) | low;
-    }
-
-    return byteCount;
 }
 
 void HDLC::_processBit(uint8_t bit)
@@ -592,16 +514,17 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
     // CRC計算
     uint16_t crc = calculateCRC16(data, length);
 
-    // フレーム構築用の一時バッファ
-    uint8_t tempFrame[MAX_FRAME_SIZE];
+    // フレーム構築用の一時バッファを動的確保
+    size_t tempFrameSize = length + 2; // データ + CRC
+    uint8_t *tempFrame = (uint8_t*)malloc(tempFrameSize);
+    if (!tempFrame)
+    {
+        return 0; // メモリ確保失敗
+    }
+
     size_t tempIndex = 0;
 
     // ペイロード + CRC
-    if (tempIndex + length + 2 > MAX_FRAME_SIZE)
-    {
-        return 0;
-    }
-
     memcpy(tempFrame + tempIndex, data, length);
     tempIndex += length;
 
@@ -609,12 +532,22 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
     tempFrame[tempIndex++] = crc & 0xFF;
     tempFrame[tempIndex++] = (crc >> 8) & 0xFF;
 
-    // ビットスタッフィング用の一時バッファ
-    uint8_t stuffedData[MAX_FRAME_SIZE * 2]; // 最悪ケースを考慮
-    size_t stuffedBitCount = this->_bitStuff(tempFrame, tempIndex, stuffedData, sizeof(stuffedData) * 8);
+    // ビットスタッフィング用の一時バッファを動的確保
+    // 最悪ケース：5連続1の後に0挿入なので、1.2倍のサイズを確保
+    size_t maxStuffedBytes = (tempFrameSize * 12) / 10 + 1; // 1.2倍 + 1バイト余裕
+    uint8_t *stuffedData = (uint8_t*)malloc(maxStuffedBytes);
+    if (!stuffedData)
+    {
+        free(tempFrame);
+        return 0; // メモリ確保失敗
+    }
+
+    size_t stuffedBitCount = this->_bitStuff(tempFrame, tempIndex, stuffedData, maxStuffedBytes * 8);
 
     if (stuffedBitCount == 0)
     {
+        free(tempFrame);
+        free(stuffedData);
         return 0;
     }
 
@@ -624,6 +557,8 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
 
     if (totalBits > maxBits)
     {
+        free(tempFrame);
+        free(stuffedData);
         return 0; // バッファサイズ不足
     }
 
@@ -654,6 +589,10 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
     // 終了フラグ (0x7E = 01111110)
     this->_writeBitsToBuffer(frameBits, bitIndex, HDLC::FLAG_SEQUENCE, 8);
     bitIndex += 8;
+
+    // メモリを解放
+    free(tempFrame);
+    free(stuffedData);
 
     return bitIndex; // 総ビット数を返す
 }

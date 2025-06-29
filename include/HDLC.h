@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <cstddef> // size_t用
 #include <string>  // std::string用
+#include <cstdlib> // malloc, free用
 // ArduinoのString型の代替
 using String = std::string;
 #else
@@ -51,13 +52,6 @@ public:
      * @return true 送信成功, false 送信失敗
      */
     bool transmitFrame(const uint8_t *data, size_t length);
-
-    /**
-     * @brief 16進数文字列をバイト配列に変換して送信（char配列版）
-     * @param hexString 16進数文字列 (例: "00F0A1")
-     * @return true 送信成功, false 送信失敗
-     */
-    bool transmitHexString(const char *hexString);
 
     /**
      * @brief フレーム受信（低レベルビット制御）
@@ -177,15 +171,6 @@ private:
      * @return フレームのビット数
      */
     size_t _createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits);
-
-    /**
-     * @brief 16進数文字列をバイト配列に変換（char配列版）
-     * @param hexString 16進数文字列
-     * @param buffer 変換結果のバッファ
-     * @param maxLength バッファの最大長
-     * @return 変換されたバイト数
-     */
-    size_t _hexStringToBytes(const char *hexString, uint8_t *buffer, size_t maxLength);
 
     /**
      * @brief 受信ビットの処理
