@@ -316,20 +316,6 @@ void loop()
     // コマンド処理
     processCommand();
 
-    // ポーリングベースでの受信チェック（短いタイムアウトで）
-    // NRZ方式に対応したビット制御ベースの受信を使用
-    if (hdlc.receiveFrameWithBitControl(500))
-    { // 50msタイムアウト
-        // 受信完了後、キューからデータを読み出し
-        uint8_t buffer[256];
-        size_t receivedLength = hdlc.readFrame(buffer, sizeof(buffer));
-        if (receivedLength > 0)
-        {
-            // コールバック関数を呼び出し（互換性のため）
-            onFrameReceived(buffer, receivedLength, true); // CRC検証は内部で実施済み
-        }
-    }
-
     // 少し待機
     delay(10);
 }

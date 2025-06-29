@@ -161,6 +161,12 @@ bool HDLC::sendSNRMAndWaitUA()
 
 bool HDLC::sendICommand(const uint8_t *data, size_t length)
 {
+    // デフォルトタイムアウト5秒で内部実装を呼び出し
+    return this->sendICommand(data, length, 5000);
+}
+
+bool HDLC::sendICommand(const uint8_t *data, size_t length, uint32_t timeoutMs)
+{
     if (!this->m_initialized || !data || length == 0)
     {
         return false;
@@ -177,15 +183,108 @@ bool HDLC::sendICommand(const uint8_t *data, size_t length)
     }
 
     // Iフレームを送信
-    bool success = this->_transmitFrame(iFrame, frameLength);
-
-    if (success)
+    if (!this->_transmitFrame(iFrame, frameLength))
     {
-        // 送信シーケンス番号を次に進める（0-7で循環）
-        this->m_sendSequence = (this->m_sendSequence + 1) & 0x07;
+        return false;
     }
 
-    return success;
+#ifndef NATIVE_TEST
+    Serial.print("I-frame sent, waiting for response (timeout: ");
+    Serial.print(timeoutMs);
+    Serial.println("ms)");
+#endif
+
+    // レスポンス待機（RRまたはREJフレーム）
+    if (!this->receiveFrameWithBitControl(timeoutMs))
+    {
+#ifndef NATIVE_TEST
+        Serial.println("Response timeout");
+#endif
+        return false; // タイムアウト
+    }
+
+    // レスポンスの検証
+    uint8_t responseBuffer[MAX_FRAME_SIZE];
+    size_t responseLength = this->readFrame(responseBuffer, MAX_FRAME_SIZE);
+
+    Serial.print("Response length: ");
+    Serial.println(responseLength);
+    Serial.println("Response frame: ");
+    for (size_t i = 0; i < responseLength; i++)
+    {
+        Serial.print(responseBuffer[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    if (responseLength >= 2) // アドレス + コントロール 最低限
+    {
+        uint8_t responseAddress = responseBuffer[0];
+        uint8_t responseControl = responseBuffer[1];
+
+#ifndef NATIVE_TEST
+        Serial.print("Response received - Address: 0x");
+        Serial.print(responseAddress, HEX);
+        Serial.print(", Control: 0x");
+        Serial.println(responseControl, HEX);
+#endif
+
+        // アドレスが一致するかチェック
+        if (responseAddress != this->m_targetAddress)
+        {
+#ifndef NATIVE_TEST
+            Serial.println("Address mismatch in response");
+#endif
+            // アドレス不一致は一旦無視
+            // return false; // アドレス不一致
+        }
+
+        // RRフレーム（正常応答）かチェック
+        if (this->_isRRFrame(responseControl))
+        {
+            // 受信シーケンス番号を確認
+            uint8_t receivedSeq = this->_extractSequenceNumber(responseControl);
+#ifndef NATIVE_TEST
+            Serial.print("RR frame received, sequence: ");
+            Serial.print(receivedSeq);
+            Serial.print(", expected: ");
+            Serial.println(this->m_sendSequence);
+#endif
+
+            if (receivedSeq == this->m_sendSequence)
+            {
+                // 送信シーケンス番号を次に進める（0-7で循環）
+                this->m_sendSequence = (this->m_sendSequence + 1) & 0x07;
+#ifndef NATIVE_TEST
+                Serial.println("I-frame acknowledged successfully");
+#endif
+                return true; // 正常応答
+            }
+        }
+        // REJフレーム（再送要求）かチェック
+        else if (this->_isREJFrame(responseControl))
+        {
+#ifndef NATIVE_TEST
+            Serial.println("REJ frame received (retransmission required)");
+#endif
+            // REJフレームの場合は再送が必要だが、ここでは失敗として扱う
+            return false; // 再送要求（エラー扱い）
+        }
+#ifndef NATIVE_TEST
+        else
+        {
+            Serial.println("Unknown response frame type");
+        }
+#endif
+    }
+    else
+    {
+#ifndef NATIVE_TEST
+        Serial.println("Invalid response length");
+#endif
+    }
+
+    return false; // 不正なレスポンス
 }
 
 void HDLC::setAddress(uint8_t address)
@@ -213,6 +312,9 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
     {
         bitStartTime = this->m_pinInterface.micros();
         uint8_t bit = this->_readBit();
+
+        Serial.print("Received bit: ");
+        Serial.println(bit);
 
         // フラグシーケンス検出処理
         this->_processReceivedBit(bit, context);
@@ -468,6 +570,17 @@ bool HDLC::_transmitFrame(const uint8_t *data, size_t length)
         return false;
     }
 
+    Serial.print("Transmitting HDLC frame (");
+    Serial.print(frameBitCount);
+    Serial.print(" bits): ");
+    for (size_t i = 0; i < (frameBitCount + 7) / 8; i++)
+    {
+        // フレームバッファの内容を16進数で表示
+        Serial.print(frameBuffer[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
     // 送信モードに切り替え
     this->_enableTransmit();
     this->m_pinInterface.delayMicroseconds(100); // 安定化待機
@@ -487,9 +600,13 @@ bool HDLC::_transmitFrame(const uint8_t *data, size_t length)
 }
 
 // HDLCフレーム作成メソッド
-size_t HDLC::_createHDLCFrame(uint8_t address, uint8_t control,
-                              const uint8_t *info, size_t infoLength,
-                              uint8_t *frameBuffer, size_t maxLength)
+size_t HDLC::_createHDLCFrame(
+    uint8_t address,
+    uint8_t control,
+    const uint8_t *info,
+    size_t infoLength,
+    uint8_t *frameBuffer,
+    size_t maxLength)
 {
     if (!frameBuffer || maxLength < 4) // 最低限: アドレス + コントロール + CRC(2)
     {
@@ -866,4 +983,23 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
     free(stuffedData);
 
     return bitIndex; // 総ビット数を返す
+}
+
+// レスポンス判定ヘルパーメソッド
+bool HDLC::_isRRFrame(uint8_t control)
+{
+    // RRフレーム: ビット0が1、ビット3が0（S形式フレーム）
+    return (control & 0x01) == 0x01 && (control & 0x08) == 0x00;
+}
+
+bool HDLC::_isREJFrame(uint8_t control)
+{
+    // REJフレーム: 下位4ビットが0x09（S形式フレーム）
+    return (control & 0x0F) == CMD_REJ;
+}
+
+uint8_t HDLC::_extractSequenceNumber(uint8_t control)
+{
+    // シーケンス番号はビット1-3に格納
+    return (control >> 1) & 0x07;
 }

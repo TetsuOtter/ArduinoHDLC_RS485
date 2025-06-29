@@ -41,7 +41,9 @@ public:
     {
         CMD_SNRM = 0x83, // Set Normal Response Mode
         CMD_UA = 0x63,   // Unnumbered Acknowledgment
-        CMD_I = 0x00     // Information (下位3ビットに送信シーケンス番号)
+        CMD_I = 0x00,    // Information (下位3ビットに送信シーケンス番号)
+        CMD_RR = 0x01,   // Receive Ready (下位3ビットに受信シーケンス番号)
+        CMD_REJ = 0x09   // Reject (下位3ビットに受信シーケンス番号)
     };
 
     /**
@@ -75,6 +77,15 @@ public:
      * @return true 成功, false 失敗
      */
     bool sendICommand(const uint8_t *data, size_t length);
+
+    /**
+     * @brief Iコマンドでデータを送信（タイムアウト指定）
+     * @param data 送信するデータ
+     * @param length データ長
+     * @param timeoutMs レスポンス待機タイムアウト時間（ミリ秒）
+     * @return true 成功, false 失敗
+     */
+    bool sendICommand(const uint8_t *data, size_t length, uint32_t timeoutMs);
 
     /**
      * @brief フレーム受信（低レベルビット制御）
@@ -377,6 +388,28 @@ private:
      * @param frameLength フレーム長
      */
     void _storeValidFrame(size_t frameLength);
+
+    // レスポンス判定ヘルパーメソッド
+    /**
+     * @brief RRフレーム（Receive Ready）かチェック
+     * @param control コントロールフィールド
+     * @return true RRフレーム, false その他
+     */
+    bool _isRRFrame(uint8_t control);
+
+    /**
+     * @brief REJフレーム（Reject）かチェック
+     * @param control コントロールフィールド
+     * @return true REJフレーム, false その他
+     */
+    bool _isREJFrame(uint8_t control);
+
+    /**
+     * @brief レスポンスフレームからシーケンス番号を抽出
+     * @param control コントロールフィールド
+     * @return シーケンス番号（0-7）
+     */
+    uint8_t _extractSequenceNumber(uint8_t control);
 };
 
 #endif // HDLC_H
