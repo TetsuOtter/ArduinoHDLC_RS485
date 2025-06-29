@@ -44,8 +44,8 @@ TEST_F(HDLCResponseTest, IsREJFrameTest)
 // Iコマンド送信とRRレスポンステスト
 TEST_F(HDLCResponseTest, SendICommandWithRRResponse)
 {
-    // 初期化
-    hdlc->setAddress(1);
+    // 初期化（テスト環境ではデフォルトアドレス1が設定される）
+    hdlc->begin();
 
     // 送信データ
     uint8_t testData[] = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
@@ -62,7 +62,7 @@ TEST_F(HDLCResponseTest, SendICommandWithRRResponse)
 // シーケンス番号管理テスト
 TEST_F(HDLCResponseTest, SequenceNumberManagement)
 {
-    hdlc->setAddress(1);
+    hdlc->begin();
 
     // 複数のIコマンド送信でシーケンス番号が正しく管理されることを確認
     // モックでの実装が複雑になるため、基本的な動作確認に留める
@@ -72,7 +72,7 @@ TEST_F(HDLCResponseTest, SequenceNumberManagement)
 // タイムアウトテスト
 TEST_F(HDLCResponseTest, ResponseTimeout)
 {
-    hdlc->setAddress(1);
+    hdlc->begin();
 
     uint8_t testData[] = {0x54, 0x65, 0x73, 0x74}; // "Test"
 
@@ -86,7 +86,7 @@ TEST_F(HDLCResponseTest, ResponseTimeout)
 // アドレス不一致テスト
 TEST_F(HDLCResponseTest, AddressMismatchInResponse)
 {
-    hdlc->setAddress(1);
+    hdlc->begin();
 
     // 異なるアドレスからのレスポンスを受信した場合の処理テスト
     EXPECT_TRUE(true);

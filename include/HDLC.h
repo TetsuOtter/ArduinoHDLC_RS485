@@ -116,33 +116,6 @@ public:
      */
     static uint16_t calculateCRC16(const uint8_t *data, size_t length);
 
-// テスト用public関数
-#ifdef NATIVE_TEST
-    /**
-     * @brief ビットスタッフィング（テスト用公開）
-     */
-    size_t testBitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits)
-    {
-        return _bitStuff(data, length, stuffedBits, maxBits);
-    }
-
-    /**
-     * @brief ビットデスタッフィング（テスト用公開）
-     */
-    size_t testBitDestuff(const uint8_t *stuffedBytes, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
-    {
-        return _bitDestuff(stuffedBytes, bitCount, destuffedData, maxLength);
-    }
-
-    /**
-     * @brief フレーム作成（テスト用公開）
-     */
-    size_t testCreateFrameBits(const uint8_t *data, size_t length, uint8_t *frameBytes, size_t maxBits)
-    {
-        return _createFrameBits(data, length, frameBytes, maxBits);
-    }
-#endif
-
 private:
     // 受信コンテキスト構造体
     struct ReceiveContext
@@ -208,6 +181,19 @@ private:
     void _transmitBit(uint8_t bit);
 
     /**
+     * @brief 1バイト送信（フラグ用）
+     * @param byte 送信バイト
+     */
+    void _transmitByte(uint8_t byte);
+
+    /**
+     * @brief 1バイト送信（ビットスタッフィング付き）
+     * @param byte 送信バイト
+     * @param consecutiveOnes 連続1カウント（参照渡し）
+     */
+    void _transmitByteWithStuffing(uint8_t byte, uint8_t &consecutiveOnes);
+
+    /**
      * @brief 1ビット受信
      * @return 受信ビット
      */
@@ -251,53 +237,6 @@ private:
     size_t _createHDLCFrame(uint8_t address, uint8_t control,
                             const uint8_t *info, size_t infoLength,
                             uint8_t *frameBuffer, size_t maxLength);
-
-    /**
-     * @brief ビットスタッフィング（送信用）
-     * @param data 元データ
-     * @param length 元データ長（バイト）
-     * @param stuffedBits スタッフィング後のバイト配列（効率的にパッキング）
-     * @param maxBits 最大ビット数
-     * @return スタッフィング後のビット数
-     */
-    size_t _bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits);
-
-    /**
-     * @brief ビットデスタッフィング（受信用）
-     * @param stuffedBytes スタッフィング済みバイト配列
-     * @param bitCount ビット数
-     * @param destuffedData デスタッフィング後のデータ
-     * @param maxLength 最大データ長（バイト）
-     * @return デスタッフィング後のデータ長（バイト）
-     */
-    size_t _bitDestuff(const uint8_t *stuffedBytes, size_t bitCount, uint8_t *destuffedData, size_t maxLength);
-
-    /**
-     * @brief バイトバッファに1ビットを書き込み
-     * @param buffer 書き込み先バッファ
-     * @param bitIndex ビット位置
-     * @param bit 書き込むビット値
-     */
-    void _writeBitToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t bit);
-
-    /**
-     * @brief バイトバッファに複数ビットを書き込み
-     * @param buffer 書き込み先バッファ
-     * @param bitIndex 開始ビット位置
-     * @param value 書き込む値
-     * @param numBits ビット数
-     */
-    void _writeBitsToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t value, size_t numBits);
-
-    /**
-     * @brief HDLCフレームの作成（ビットスタッフィング対応）
-     * @param data ペイロードデータ
-     * @param length ペイロード長
-     * @param frameBits 作成されたフレーム（ビット配列）
-     * @param maxBits フレームの最大ビット数
-     * @return フレームのビット数
-     */
-    size_t _createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits);
 
     /**
      * @brief 受信ビットの処理

@@ -207,6 +207,7 @@ bool HDLC::sendICommand(const uint8_t *data, size_t length, uint32_t timeoutMs)
     uint8_t responseBuffer[MAX_FRAME_SIZE];
     size_t responseLength = this->readFrame(responseBuffer, MAX_FRAME_SIZE);
 
+#ifndef NATIVE_TEST
     Serial.print("Response length: ");
     Serial.println(responseLength);
     Serial.println("Response frame: ");
@@ -216,6 +217,7 @@ bool HDLC::sendICommand(const uint8_t *data, size_t length, uint32_t timeoutMs)
         Serial.print(" ");
     }
     Serial.println();
+#endif
 
     if (responseLength >= 2) // アドレス + コントロール 最低限
     {
@@ -313,8 +315,10 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         bitStartTime = this->m_pinInterface.micros();
         uint8_t bit = this->_readBit();
 
+#ifndef NATIVE_TEST
         Serial.print("Received bit: ");
         Serial.println(bit);
+#endif
 
         // フラグシーケンス検出処理
         this->_processReceivedBit(bit, context);
@@ -440,22 +444,75 @@ void HDLC::_storeBitInFrame(uint8_t bit, ReceiveContext &context)
 
 bool HDLC::_processCompleteFrame(const uint8_t *rawData, size_t rawBitCount)
 {
-    // スタッフィング除去とフレーム処理
-    size_t destuffedLength = this->_bitDestuff(rawData, rawBitCount, this->m_receiveBuffer, MAX_FRAME_SIZE);
+    if (!rawData || rawBitCount == 0)
+    {
+        return false;
+    }
 
-    if (destuffedLength < 3) // 最低限のフレーム長（アドレス+コントロール+CRC）
+    // ビットデスタッフィングを直接実行
+    uint8_t consecutiveOnes = 0;
+    uint8_t currentByte = 0;
+    int8_t bitPosition = 7;
+    size_t outputByteIndex = 0;
+
+    // 入力バイト配列をビット単位で処理（rawBitCountまで）
+    for (size_t bitIdx = 0; bitIdx < rawBitCount; bitIdx++)
+    {
+        // ビットインデックスからバイトインデックスとビット位置を計算
+        size_t byteIdx = bitIdx / 8;
+        int bitPos = 7 - (bitIdx % 8);
+        uint8_t bit = (rawData[byteIdx] >> bitPos) & 1;
+
+        if (bit == 1)
+        {
+            consecutiveOnes++;
+        }
+        else
+        {
+            if (consecutiveOnes == 5)
+            {
+                // スタッフィングされた0ビットなので無視
+                consecutiveOnes = 0;
+                continue;
+            }
+            consecutiveOnes = 0;
+        }
+
+        // 通常のデータビット
+        if (bit == 1)
+        {
+            currentByte |= (1 << bitPosition);
+        }
+
+        bitPosition--;
+
+        if (bitPosition < 0)
+        {
+            // 1バイト完成
+            if (outputByteIndex >= MAX_FRAME_SIZE)
+            {
+                return false; // バッファオーバーフロー
+            }
+            this->m_receiveBuffer[outputByteIndex++] = currentByte;
+            currentByte = 0;
+            bitPosition = 7;
+        }
+    }
+
+    // 最低限のフレーム長チェック（アドレス+コントロール+CRC）
+    if (outputByteIndex < 3)
     {
         return false;
     }
 
     // CRC検証
-    if (!this->_validateFrameCRC(destuffedLength))
+    if (!this->_validateFrameCRC(outputByteIndex))
     {
         return false;
     }
 
     // 有効なフレームをキューに保存
-    this->_storeValidFrame(destuffedLength);
+    this->_storeValidFrame(outputByteIndex);
     return true;
 }
 
@@ -551,51 +608,39 @@ bool HDLC::_transmitFrame(const uint8_t *data, size_t length)
         return false;
     }
 
-    // 必要なバッファサイズを計算
-    size_t maxFrameBits = ((length + 2) * 8 * 12) / 10 + 16; // スタッフィング考慮
-    size_t frameBufferBytes = (maxFrameBits + 7) / 8;
-
-    // 動的にバッファを確保
-    uint8_t *frameBuffer = (uint8_t *)malloc(frameBufferBytes);
-    if (!frameBuffer)
-    {
-        return false;
-    }
-
-    size_t frameBitCount = this->_createFrameBits(data, length, frameBuffer, maxFrameBits);
-
-    if (frameBitCount == 0)
-    {
-        free(frameBuffer);
-        return false;
-    }
-
+#ifndef NATIVE_TEST
     Serial.print("Transmitting HDLC frame (");
-    Serial.print(frameBitCount);
-    Serial.print(" bits): ");
-    for (size_t i = 0; i < (frameBitCount + 7) / 8; i++)
+    Serial.print(length);
+    Serial.println(" bytes of data)");
+    Serial.print("Data: ");
+    for (size_t i = 0; i < length; i++)
     {
-        // フレームバッファの内容を16進数で表示
-        Serial.print(frameBuffer[i], HEX);
+        Serial.print(data[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
+#endif
 
     // 送信モードに切り替え
     this->_enableTransmit();
     this->m_pinInterface.delayMicroseconds(100); // 安定化待機
 
-    // フレームをビット単位で送信
-    for (size_t i = 0; i < frameBitCount; i++)
+    // 開始フラグの送信 (0x7E = 01111110)
+    this->_transmitByte(HDLC::FLAG_SEQUENCE);
+
+    // データ送信（ビットスタッフィング付き）
+    uint8_t consecutiveOnes = 0;
+
+    for (size_t i = 0; i < length; i++)
     {
-        size_t byteIndex = i / 8;
-        size_t bitIndex = i % 8;
-        uint8_t bit = (frameBuffer[byteIndex] >> (7 - bitIndex)) & 1;
-        this->_transmitBit(bit);
-        this->_waitBitTime();
+        this->_transmitByteWithStuffing(data[i], consecutiveOnes);
     }
 
-    free(frameBuffer);
+    // 終了フラグの送信 (0x7E = 01111110)
+    // フラグ送信前に連続1カウントをリセット
+    consecutiveOnes = 0;
+    this->_transmitByte(HDLC::FLAG_SEQUENCE);
+
     return true;
 }
 
@@ -746,245 +791,6 @@ void HDLC::_processReceivedFrame()
     }
 }
 
-size_t HDLC::_bitStuff(const uint8_t *data, size_t length, uint8_t *stuffedBits, size_t maxBits)
-{
-    if (!data || length == 0 || !stuffedBits || maxBits == 0)
-    {
-        return 0;
-    }
-
-    size_t outputBitIndex = 0;
-    uint8_t consecutiveOnes = 0;
-
-    // 出力バッファを初期化
-    size_t maxBytes = (maxBits + 7) / 8;
-    for (size_t i = 0; i < maxBytes; i++)
-    {
-        stuffedBits[i] = 0;
-    }
-
-    // 入力データをビット単位で処理
-    for (size_t byteIdx = 0; byteIdx < length; byteIdx++)
-    {
-        for (int bitIdx = 7; bitIdx >= 0; bitIdx--)
-        {
-            uint8_t bit = (data[byteIdx] >> bitIdx) & 1;
-
-            // 出力バッファの容量チェック
-            if (outputBitIndex >= maxBits)
-            {
-                return 0; // バッファ不足
-            }
-
-            // ビットを出力バッファに書き込み
-            this->_writeBitToBuffer(stuffedBits, outputBitIndex, bit);
-            outputBitIndex++;
-
-            if (bit == 1)
-            {
-                consecutiveOnes++;
-                if (consecutiveOnes == 5)
-                {
-                    // 5個の連続する1の後に0を挿入
-                    if (outputBitIndex >= maxBits)
-                    {
-                        return 0; // バッファ不足
-                    }
-                    this->_writeBitToBuffer(stuffedBits, outputBitIndex, 0);
-                    outputBitIndex++;
-                    consecutiveOnes = 0;
-                }
-            }
-            else
-            {
-                consecutiveOnes = 0;
-            }
-        }
-    }
-
-    // 実際のビット数を返す
-    return outputBitIndex;
-}
-
-size_t HDLC::_bitDestuff(const uint8_t *stuffedBytes, size_t bitCount, uint8_t *destuffedData, size_t maxLength)
-{
-    if (!stuffedBytes || bitCount == 0 || !destuffedData || maxLength == 0)
-    {
-        return 0;
-    }
-
-    uint8_t consecutiveOnes = 0;
-    uint8_t currentByte = 0;
-    int8_t bitPosition = 7;
-    size_t outputByteIndex = 0;
-
-    // 入力バイト配列をビット単位で処理（bitCountまで）
-    for (size_t bitIdx = 0; bitIdx < bitCount; bitIdx++)
-    {
-        // ビットインデックスからバイトインデックスとビット位置を計算
-        size_t byteIdx = bitIdx / 8;
-        int bitPos = 7 - (bitIdx % 8);
-        uint8_t bit = (stuffedBytes[byteIdx] >> bitPos) & 1;
-
-        if (bit == 1)
-        {
-            consecutiveOnes++;
-        }
-        else
-        {
-            if (consecutiveOnes == 5)
-            {
-                // スタッフィングされた0ビットなので無視
-                consecutiveOnes = 0;
-                continue;
-            }
-            consecutiveOnes = 0;
-        }
-
-        // 通常のデータビット
-        if (bit == 1)
-        {
-            currentByte |= (1 << bitPosition);
-        }
-
-        bitPosition--;
-
-        if (bitPosition < 0)
-        {
-            // 1バイト完成
-            if (outputByteIndex >= maxLength)
-            {
-                return 0; // バッファオーバーフロー
-            }
-            destuffedData[outputByteIndex++] = currentByte;
-            currentByte = 0;
-            bitPosition = 7;
-        }
-    }
-
-    // 最後の不完全なバイトがある場合は処理しない（ビット境界でのみ完成したバイトを返す）
-    return outputByteIndex;
-}
-
-void HDLC::_writeBitToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t bit)
-{
-    size_t byteIndex = bitIndex / 8;
-    size_t bitPos = 7 - (bitIndex % 8); // MSBファースト
-
-    if (bit)
-    {
-        buffer[byteIndex] |= (1 << bitPos);
-    }
-    else
-    {
-        buffer[byteIndex] &= ~(1 << bitPos);
-    }
-}
-
-void HDLC::_writeBitsToBuffer(uint8_t *buffer, size_t bitIndex, uint8_t value, size_t numBits)
-{
-    for (size_t i = 0; i < numBits; i++)
-    {
-        uint8_t bit = (value >> (numBits - 1 - i)) & 1;
-        this->_writeBitToBuffer(buffer, bitIndex + i, bit);
-    }
-}
-
-size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits)
-{
-    if (!data || length == 0 || !frameBits || maxBits < 32)
-    { // 最小フレーム長チェック
-        return 0;
-    }
-
-    // CRC計算
-    uint16_t crc = calculateCRC16(data, length);
-
-    // フレーム構築用の一時バッファを動的確保
-    size_t tempFrameSize = length + 2; // データ + CRC
-    uint8_t *tempFrame = (uint8_t *)malloc(tempFrameSize);
-    if (!tempFrame)
-    {
-        return 0; // メモリ確保失敗
-    }
-
-    size_t tempIndex = 0;
-
-    // ペイロード + CRC
-    for (size_t i = 0; i < length; i++)
-    {
-        tempFrame[tempIndex++] = data[i];
-    }
-
-    // CRC追加（リトルエンディアン）
-    tempFrame[tempIndex++] = crc & 0xFF;
-    tempFrame[tempIndex++] = (crc >> 8) & 0xFF;
-
-    // ビットスタッフィング用の一時バッファを動的確保
-    // 最悪ケース：5連続1の後に0挿入なので、1.2倍のサイズを確保
-    size_t maxStuffedBytes = (tempFrameSize * 12) / 10 + 1; // 1.2倍 + 1バイト余裕
-    uint8_t *stuffedData = (uint8_t *)malloc(maxStuffedBytes);
-    if (!stuffedData)
-    {
-        free(tempFrame);
-        return 0; // メモリ確保失敗
-    }
-
-    size_t stuffedBitCount = this->_bitStuff(tempFrame, tempIndex, stuffedData, maxStuffedBytes * 8);
-
-    if (stuffedBitCount == 0)
-    {
-        free(tempFrame);
-        free(stuffedData);
-        return 0;
-    }
-
-    // フレーム構造: FLAG + スタッフィング済みデータ + FLAG
-    // ビット単位で計算
-    size_t totalBits = 8 + stuffedBitCount + 8; // FLAG(8bit) + データ + FLAG(8bit)
-
-    if (totalBits > maxBits)
-    {
-        free(tempFrame);
-        free(stuffedData);
-        return 0; // バッファサイズ不足
-    }
-
-    // 出力バッファを初期化
-    size_t maxBytes = (maxBits + 7) / 8;
-    for (size_t i = 0; i < maxBytes; i++)
-    {
-        frameBits[i] = 0;
-    }
-
-    size_t bitIndex = 0;
-
-    // 開始フラグ (0x7E = 01111110)
-    this->_writeBitsToBuffer(frameBits, bitIndex, HDLC::FLAG_SEQUENCE, 8);
-    bitIndex += 8;
-
-    // スタッフィング済みデータをビット単位で書き込み
-    for (size_t i = 0; i < stuffedBitCount; i++)
-    {
-        // ビットインデックスからバイトインデックスとビット位置を計算
-        size_t srcByteIdx = i / 8;
-        int srcBitPos = 7 - (i % 8);
-        uint8_t bit = (stuffedData[srcByteIdx] >> srcBitPos) & 1;
-        this->_writeBitToBuffer(frameBits, bitIndex, bit);
-        bitIndex++;
-    }
-
-    // 終了フラグ (0x7E = 01111110)
-    this->_writeBitsToBuffer(frameBits, bitIndex, HDLC::FLAG_SEQUENCE, 8);
-    bitIndex += 8;
-
-    // メモリを解放
-    free(tempFrame);
-    free(stuffedData);
-
-    return bitIndex; // 総ビット数を返す
-}
-
 // レスポンス判定ヘルパーメソッド
 bool HDLC::_isRRFrame(uint8_t control)
 {
@@ -1002,4 +808,43 @@ uint8_t HDLC::_extractSequenceNumber(uint8_t control)
 {
     // シーケンス番号はビット1-3に格納
     return (control >> 1) & 0x07;
+}
+
+void HDLC::_transmitByte(uint8_t byte)
+{
+    for (int i = 7; i >= 0; i--)
+    {
+        uint8_t bit = (byte >> i) & 1;
+        this->_transmitBit(bit);
+        this->_waitBitTime();
+    }
+}
+
+void HDLC::_transmitByteWithStuffing(uint8_t byte, uint8_t &consecutiveOnes)
+{
+    for (int i = 7; i >= 0; i--)
+    {
+        uint8_t bit = (byte >> i) & 1;
+
+        // データビットを送信
+        this->_transmitBit(bit);
+        this->_waitBitTime();
+
+        // ビットスタッフィング処理
+        if (bit == 1)
+        {
+            consecutiveOnes++;
+            if (consecutiveOnes == 5)
+            {
+                // 5個の連続する1の後に0を挿入
+                this->_transmitBit(0);
+                this->_waitBitTime();
+                consecutiveOnes = 0;
+            }
+        }
+        else
+        {
+            consecutiveOnes = 0;
+        }
+    }
 }
