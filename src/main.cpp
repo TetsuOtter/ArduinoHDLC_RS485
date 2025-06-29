@@ -27,7 +27,7 @@ HDLC hdlc(rs485Driver);
 
 // 受信データ処理用
 size_t serialBufferLength = 0;
-char serialBuffer[512];
+char serialBuffer[128];
 bool commandReady = false;
 
 /**
@@ -86,7 +86,10 @@ void processSerialInput()
         }
         else
         {
-            serialBuffer[serialBufferLength++] += c;
+            if (serialBufferLength < sizeof(serialBuffer) - 1)
+            {
+                serialBuffer[serialBufferLength++] = c;
+            }
         }
     }
 }
@@ -103,13 +106,13 @@ void processCommand()
 
     commandReady = false;
 
-    String serialBufferString = serialBuffer;
+    String serialBufferString(serialBuffer);
     Serial.print("Before trim length: ");
     Serial.println(serialBufferString.length());
     Serial.print("Before trim strlen: ");
     Serial.println(strlen(serialBuffer));
-    serialBufferLength = 0;
     serialBufferString.trim();
+    serialBufferLength = 0;
 
     if (serialBufferString.length() == 0)
     {
