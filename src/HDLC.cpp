@@ -138,7 +138,7 @@ bool HDLC::sendSNRMAndWaitUA()
     }
 
     // UA応答を待機（5秒タイムアウト）
-    if (!this->receiveFrameWithBitControl(500))
+    if (!this->receiveFrameWithBitControl(50))
     {
         return false;
     }
@@ -161,8 +161,7 @@ bool HDLC::sendSNRMAndWaitUA()
 
 bool HDLC::sendICommand(const uint8_t *data, size_t length)
 {
-    // デフォルトタイムアウト5秒で内部実装を呼び出し
-    return this->sendICommand(data, length, 5000);
+    return this->sendICommand(data, length, 50);
 }
 
 bool HDLC::sendICommand(const uint8_t *data, size_t length, uint32_t timeoutMs)
