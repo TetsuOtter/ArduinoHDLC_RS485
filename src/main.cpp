@@ -6,11 +6,11 @@
 #include "HDLC.h"
 #include "ArduinoPinInterface.h"
 
-#ifdef ARDUINO_AVR_UNO
-#define RS485_TX_PIN 2
+#if defined(ARDUINO_AVR_UNO) || defined(ARDUINO_AVR_LEONARDO)
 #define RS485_RX_PIN 5
-#define RS485_DE_PIN 3
 #define RS485_RE_PIN 4
+#define RS485_DE_PIN 3
+#define RS485_TX_PIN 2
 #else
 #define RS485_TX_PIN D2
 #define RS485_RX_PIN D5
@@ -26,7 +26,8 @@ RS485Driver rs485Driver(pinInterface, RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN, 
 HDLC hdlc(rs485Driver);
 
 // 受信データ処理用
-String serialBuffer = "";
+size_t serialBufferLength = 0;
+char serialBuffer[512];
 bool commandReady = false;
 
 /**
@@ -72,17 +73,20 @@ void processSerialInput()
     while (Serial.available())
     {
         char c = Serial.read();
+        Serial.print(c);
+        Serial.flush();
 
         if (c == '\n' || c == '\r')
         {
-            if (serialBuffer.length() > 0)
+            if (serialBufferLength > 0)
             {
                 commandReady = true;
+                serialBuffer[serialBufferLength] = '\0';
             }
         }
         else
         {
-            serialBuffer += c;
+            serialBuffer[serialBufferLength++] += c;
         }
     }
 }
@@ -99,20 +103,28 @@ void processCommand()
 
     commandReady = false;
 
-    // 空白を除去
-    serialBuffer.trim();
+    String serialBufferString = serialBuffer;
+    Serial.print("Before trim length: ");
+    Serial.println(serialBufferString.length());
+    Serial.print("Before trim strlen: ");
+    Serial.println(strlen(serialBuffer));
+    serialBufferLength = 0;
+    serialBufferString.trim();
 
-    if (serialBuffer.length() == 0)
+    if (serialBufferString.length() == 0)
     {
-        serialBuffer = "";
+        Serial.println("No command to process.");
+        Serial.print("(Serial buffer: ");
+        Serial.print(serialBuffer);
+        Serial.println(")");
         return;
     }
 
     Serial.print("Transmitting: ");
-    Serial.println(serialBuffer);
+    Serial.println(serialBufferString);
 
     // 16進数文字列をHDLCで送信
-    if (hdlc.transmitHexString(serialBuffer))
+    if (hdlc.transmitHexString(serialBufferString))
     {
         Serial.println("Transmission successful");
     }
@@ -120,8 +132,6 @@ void processCommand()
     {
         Serial.println("Transmission failed");
     }
-
-    serialBuffer = "";
 }
 
 /**
