@@ -73,8 +73,19 @@ void processSerialInput()
     while (Serial.available())
     {
         char c = Serial.read();
+        
+#if defined(ARDUINO_AVR_LEONARDO)
+        // Leonardo用デバッグ：受信文字の確認
+        Serial.print("RX: 0x");
+        Serial.print((uint8_t)c, HEX);
+        Serial.print(" '");
+        Serial.print(c);
+        Serial.println("'");
+        Serial.flush();
+#else
         Serial.print(c);
         Serial.flush();
+#endif
 
         if (c == '\n' || c == '\r')
         {
@@ -82,6 +93,11 @@ void processSerialInput()
             {
                 commandReady = true;
                 serialBuffer[serialBufferLength] = '\0';
+#if defined(ARDUINO_AVR_LEONARDO)
+                Serial.print("Leonardo: Command ready, len=");
+                Serial.println(serialBufferLength);
+                Serial.flush();
+#endif
             }
         }
         else
@@ -148,11 +164,38 @@ void setup()
 {
     // シリアル通信の初期化
     Serial.begin(115200);
+    
 #ifdef LED_BUILTIN
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
     bool ledState = false;
 #endif
+
+    // Leonardo用の改良された初期化
+#if defined(ARDUINO_AVR_LEONARDO)
+    // Leonardoの場合：タイムアウト付きで待機
+    unsigned long startTime = millis();
+    while (!Serial && (millis() - startTime) < 3000) // 3秒でタイムアウト
+    {
+#ifdef LED_BUILTIN
+        if ((millis() - startTime) % 250 == 0) // 250ms間隔で点滅
+        {
+            digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
+            ledState = !ledState;
+        }
+#endif
+        delay(50); // CPU負荷軽減
+    }
+    
+    // Leonardoのシリアルバッファをクリア
+    delay(500); // 追加の安定化時間
+    while (Serial.available() > 0) {
+        Serial.read(); // バッファクリア
+    }
+    Serial.flush(); // 送信バッファクリア
+    
+#else
+    // 他のArduino（UNO等）の場合：従来通り
     while (!Serial)
     {
 #ifdef LED_BUILTIN
@@ -161,15 +204,21 @@ void setup()
 #endif
         delay(500);
     }
+#endif
+
 #ifdef LED_BUILTIN
-    for (int i = 0; i < 20; i++)
+    // 初期化完了の合図（短い点滅）
+    for (int i = 0; i < 6; i++)
     {
-        digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
-        ledState = !ledState;
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(100);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(100);
     }
 #endif
 
     Serial.println("Initializing Arduino HDLC RS485 Communication...");
+    Serial.flush(); // 出力完了を確実にする
 
     delay(1000); // 安定化のため少し待機
 
@@ -177,18 +226,47 @@ void setup()
     if (!hdlc.begin())
     {
         Serial.println("ERROR: Failed to initialize HDLC");
+        Serial.flush();
         while (1)
         {
-            delay(1000);
+#ifdef LED_BUILTIN
+            digitalWrite(LED_BUILTIN, HIGH);
+            delay(200);
+            digitalWrite(LED_BUILTIN, LOW);
+            delay(200);
+#endif
         }
     }
 
     // ステータス表示
     printStatus();
+    Serial.flush(); // 出力完了を確実にする
+    
+    // Leonardo用：最終的なシリアルバッファクリア
+#if defined(ARDUINO_AVR_LEONARDO)
+    delay(200);
+    while (Serial.available() > 0) {
+        Serial.read();
+    }
+    Serial.println("Leonardo: Ready for input");
+    Serial.flush();
+#endif
 }
 
 void loop()
 {
+#if defined(ARDUINO_AVR_LEONARDO)
+    // Leonardo用：定期的なシリアル状態確認
+    static unsigned long lastDebug = 0;
+    if (millis() - lastDebug > 5000) // 5秒ごと
+    {
+        Serial.print("Leonardo: Serial available: ");
+        Serial.println(Serial.available());
+        Serial.flush();
+        lastDebug = millis();
+    }
+#endif
+
     // Serial入力の処理
     processSerialInput();
 
