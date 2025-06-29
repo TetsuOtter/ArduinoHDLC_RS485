@@ -67,10 +67,10 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
     // 必要なバッファサイズを計算
     // 最悪の場合: (データ長 + CRC2バイト) * 8ビット * 1.2倍(スタッフィング) + フラグ16ビット
     size_t maxFrameBits = ((length + 2) * 8 * 12) / 10 + 16; // 1.2倍の計算を整数で行う
-    size_t frameBufferBytes = (maxFrameBits + 7) / 8; // ビットをバイトに変換（切り上げ）
-    
+    size_t frameBufferBytes = (maxFrameBits + 7) / 8;        // ビットをバイトに変換（切り上げ）
+
     // 動的にバッファを確保
-    uint8_t *frameBuffer = (uint8_t*)malloc(frameBufferBytes);
+    uint8_t *frameBuffer = (uint8_t *)malloc(frameBufferBytes);
     if (!frameBuffer)
     {
 #ifndef NATIVE_TEST
@@ -206,6 +206,7 @@ bool HDLC::receiveFrameWithBitControl(uint32_t timeoutMs)
         // 1ビット読み取り（時間測定付き）
         uint32_t bitStartTime = this->m_driver.getPinInterface().micros();
         uint8_t bit = this->m_driver.readBit();
+        Serial.println("bit read: " + String(bit));
         uint32_t bitReadTime = this->m_driver.getPinInterface().micros() - bitStartTime;
 
         // HDLCフレーム処理
@@ -516,7 +517,7 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
 
     // フレーム構築用の一時バッファを動的確保
     size_t tempFrameSize = length + 2; // データ + CRC
-    uint8_t *tempFrame = (uint8_t*)malloc(tempFrameSize);
+    uint8_t *tempFrame = (uint8_t *)malloc(tempFrameSize);
     if (!tempFrame)
     {
         return 0; // メモリ確保失敗
@@ -535,7 +536,7 @@ size_t HDLC::_createFrameBits(const uint8_t *data, size_t length, uint8_t *frame
     // ビットスタッフィング用の一時バッファを動的確保
     // 最悪ケース：5連続1の後に0挿入なので、1.2倍のサイズを確保
     size_t maxStuffedBytes = (tempFrameSize * 12) / 10 + 1; // 1.2倍 + 1バイト余裕
-    uint8_t *stuffedData = (uint8_t*)malloc(maxStuffedBytes);
+    uint8_t *stuffedData = (uint8_t *)malloc(maxStuffedBytes);
     if (!stuffedData)
     {
         free(tempFrame);

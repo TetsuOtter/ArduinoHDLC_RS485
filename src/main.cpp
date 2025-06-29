@@ -101,29 +101,14 @@ void processSerialInput()
     {
         char c = Serial.read();
 
-#if defined(ARDUINO_AVR_LEONARDO)
-        // Leonardo用デバッグ：受信文字の確認
-        Serial.print("RX: 0x");
-        Serial.print((uint8_t)c, HEX);
-        Serial.print(" '");
-        Serial.print(c);
-        Serial.println("'");
-        Serial.flush();
-#else
         Serial.print(c);
         Serial.flush();
-#endif
 
         if (c == '\n' || c == '\r')
         {
             if (binaryBufferLength > 0)
             {
                 commandReady = true;
-#if defined(ARDUINO_AVR_LEONARDO)
-                Serial.print("Leonardo: Command ready, len=");
-                Serial.println(binaryBufferLength);
-                Serial.flush();
-#endif
             }
         }
         else if (c == ' ')
@@ -318,18 +303,6 @@ void setup()
 
 void loop()
 {
-#if defined(ARDUINO_AVR_LEONARDO)
-    // Leonardo用：定期的なシリアル状態確認
-    static unsigned long lastDebug = 0;
-    if (millis() - lastDebug > 5000) // 5秒ごと
-    {
-        Serial.print("Leonardo: Serial available: ");
-        Serial.println(Serial.available());
-        Serial.flush();
-        lastDebug = millis();
-    }
-#endif
-
     // Serial入力の処理
     processSerialInput();
 
@@ -338,7 +311,7 @@ void loop()
 
     // ポーリングベースでの受信チェック（短いタイムアウトで）
     // NRZ方式に対応したビット制御ベースの受信を使用
-    if (hdlc.receiveFrameWithBitControl(50))
+    if (hdlc.receiveFrameWithBitControl(500))
     { // 50msタイムアウト
         // 受信完了後、キューからデータを読み出し
         uint8_t buffer[256];

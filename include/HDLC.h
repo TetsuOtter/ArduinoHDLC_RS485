@@ -24,9 +24,9 @@ class HDLC
 {
 public:
     /**
-     * @brief HDLCフレームの最大サイズ
+     * @brief HDLCフレームの最大サイズ（メモリ削減のため64バイトに制限）
      */
-    static const size_t MAX_FRAME_SIZE = 256;
+    static const size_t MAX_FRAME_SIZE = 64;
 
     /**
      * @brief HDLCフラグシーケンス

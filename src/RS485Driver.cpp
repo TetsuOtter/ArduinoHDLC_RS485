@@ -54,9 +54,6 @@ bool RS485Driver::begin()
 
     if (this->m_initialized)
     {
-#ifndef NATIVE_TEST
-        Serial.println("RS485: Already init");
-#endif
         return true;
     }
 
@@ -70,9 +67,6 @@ bool RS485Driver::begin()
     this->enableReceive();
 
     this->m_initialized = true;
-#ifndef NATIVE_TEST
-    Serial.println("RS485: Init OK");
-#endif
     return true;
 }
 
@@ -80,9 +74,6 @@ bool RS485Driver::transmit(const uint8_t *data, size_t bitLength)
 {
     if (!this->m_initialized || !data || bitLength == 0)
     {
-#ifndef NATIVE_TEST
-        Serial.println("RS485: TX invalid params");
-#endif
         return false;
     }
 
