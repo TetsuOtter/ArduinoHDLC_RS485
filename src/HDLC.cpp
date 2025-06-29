@@ -1,47 +1,5 @@
 #include "HDLC.h"
 
-#ifdef NATIVE_TEST
-// ネイティブテスト環境用のString互換関数
-#include <algorithm>
-#include <cctype>
-#include <sstream>
-#include <iomanip>
-
-namespace
-{
-    void replace_all(std::string &str, const std::string &from, const std::string &to)
-    {
-        size_t start_pos = 0;
-        while ((start_pos = str.find(from, start_pos)) != std::string::npos)
-        {
-            str.replace(start_pos, from.length(), to);
-            start_pos += to.length();
-        }
-    }
-
-    void to_upper_case(std::string &str)
-    {
-        std::transform(str.begin(), str.end(), str.begin(),
-                       [](unsigned char c)
-                       { return std::toupper(c); });
-    }
-
-    char char_at(const std::string &str, size_t index)
-    {
-        return (index < str.length()) ? str[index] : '\0';
-    }
-
-    std::string int_to_hex(int value)
-    {
-        std::stringstream ss;
-        ss << std::hex << std::uppercase << value;
-        return ss.str();
-    }
-}
-#endif
-
-// 静的メンバは不要になったので削除
-
 /**
  * @brief 16進数文字を数値に変換するユーティリティ関数
  * @param hexChar 16進数文字 ('0'-'9', 'A'-'F', 'a'-'f')
@@ -158,7 +116,7 @@ bool HDLC::transmitFrame(const uint8_t *data, size_t length)
     return result;
 }
 
-bool HDLC::transmitHexString(const String &hexString)
+bool HDLC::transmitHexString(const char *hexString)
 {
     uint8_t buffer[MAX_FRAME_SIZE / 2]; // 16進数文字列の場合、バイト数は文字数の半分
     size_t length = this->_hexStringToBytes(hexString, buffer, sizeof(buffer));
@@ -322,18 +280,6 @@ size_t HDLC::readFrame(uint8_t *buffer, size_t bufferSize)
     return copyLength;
 }
 
-String HDLC::readFrameAsHexString()
-{
-    if (!this->m_frameQueue.hasData)
-    {
-        return "";
-    }
-
-    String result = this->_bytesToHexString(this->m_frameQueue.data, this->m_frameQueue.length);
-    this->m_frameQueue.hasData = false;
-    return result;
-}
-
 uint16_t HDLC::calculateCRC16(const uint8_t *data, size_t length)
 {
     uint16_t crc = 0xFFFF; // CRC-16-CCITT初期値
@@ -357,24 +303,44 @@ uint16_t HDLC::calculateCRC16(const uint8_t *data, size_t length)
     return crc;
 }
 
-size_t HDLC::_hexStringToBytes(const String &hexString, uint8_t *buffer, size_t maxLength)
+size_t HDLC::_hexStringToBytes(const char *hexString, uint8_t *buffer, size_t maxLength)
 {
-    String cleanHex = hexString;
+    if (!hexString || !buffer || maxLength == 0)
+    {
+        return 0;
+    }
 
-#ifdef NATIVE_TEST
-    replace_all(cleanHex, " ", ""); // スペースを除去
-    to_upper_case(cleanHex);
-#else
-    cleanHex.replace(" ", ""); // スペースを除去
-    cleanHex.toUpperCase();
-#endif
+    // スペースを除去して長さを計算
+    size_t inputLen = strlen(hexString);
+    if (inputLen > 512) // 最大長制限
+    {
+        return 0;
+    }
 
-    if (cleanHex.length() % 2 != 0)
+    size_t cleanLen = 0;
+    char cleanHex[513]; // 最大512文字 + null終端
+
+    for (size_t i = 0; i < inputLen; i++)
+    {
+        char c = hexString[i];
+        if (c != ' ')
+        {
+            // 大文字に変換
+            if (c >= 'a' && c <= 'f')
+            {
+                c = c - 'a' + 'A';
+            }
+            cleanHex[cleanLen++] = c;
+        }
+    }
+    cleanHex[cleanLen] = '\0';
+
+    if (cleanLen % 2 != 0)
     {
         return 0; // 奇数文字は無効
     }
 
-    size_t byteCount = cleanHex.length() / 2;
+    size_t byteCount = cleanLen / 2;
     if (byteCount > maxLength)
     {
         byteCount = maxLength;
@@ -382,13 +348,8 @@ size_t HDLC::_hexStringToBytes(const String &hexString, uint8_t *buffer, size_t 
 
     for (size_t i = 0; i < byteCount; i++)
     {
-#ifdef NATIVE_TEST
-        char highChar = char_at(cleanHex, i * 2);
-        char lowChar = char_at(cleanHex, i * 2 + 1);
-#else
-        char highChar = cleanHex.charAt(i * 2);
-        char lowChar = cleanHex.charAt(i * 2 + 1);
-#endif
+        char highChar = cleanHex[i * 2];
+        char lowChar = cleanHex[i * 2 + 1];
 
         // 16進数文字を数値に変換
         uint8_t high = hexCharToValue(highChar);
@@ -398,33 +359,6 @@ size_t HDLC::_hexStringToBytes(const String &hexString, uint8_t *buffer, size_t 
     }
 
     return byteCount;
-}
-
-String HDLC::_bytesToHexString(const uint8_t *data, size_t length)
-{
-    String result = "";
-    for (size_t i = 0; i < length; i++)
-    {
-        if (data[i] < 0x10)
-        {
-            result += "0";
-        }
-#ifdef NATIVE_TEST
-        result += int_to_hex(data[i]);
-#else
-        result += String(data[i], HEX);
-#endif
-        if (i < length - 1)
-        {
-            result += " ";
-        }
-    }
-#ifdef NATIVE_TEST
-    to_upper_case(result);
-#else
-    result.toUpperCase();
-#endif
-    return result;
 }
 
 void HDLC::_processBit(uint8_t bit)

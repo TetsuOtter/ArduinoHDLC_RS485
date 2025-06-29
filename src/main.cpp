@@ -27,7 +27,7 @@ HDLC hdlc(rs485Driver);
 
 // 受信データ処理用
 size_t serialBufferLength = 0;
-char serialBuffer[128];
+char serialBuffer[128] = {0}; // 明示的にゼロ初期化
 bool commandReady = false;
 
 /**
@@ -106,28 +106,19 @@ void processCommand()
 
     commandReady = false;
 
-    String serialBufferString(serialBuffer);
-    Serial.print("Before trim length: ");
-    Serial.println(serialBufferString.length());
-    Serial.print("Before trim strlen: ");
-    Serial.println(strlen(serialBuffer));
-    serialBufferString.trim();
-    serialBufferLength = 0;
-
-    if (serialBufferString.length() == 0)
+    if (serialBufferLength == 0)
     {
         Serial.println("No command to process.");
-        Serial.print("(Serial buffer: ");
-        Serial.print(serialBuffer);
-        Serial.println(")");
         return;
     }
 
     Serial.print("Transmitting: ");
-    Serial.println(serialBufferString);
+    Serial.println(serialBuffer);
+    Serial.print("Buffer length: ");
+    Serial.println(serialBufferLength);
 
-    // 16進数文字列をHDLCで送信
-    if (hdlc.transmitHexString(serialBufferString))
+    // char配列をHDLCで送信
+    if (hdlc.transmitHexString(serialBuffer))
     {
         Serial.println("Transmission successful");
     }
@@ -135,6 +126,9 @@ void processCommand()
     {
         Serial.println("Transmission failed");
     }
+
+    // バッファをクリア
+    serialBufferLength = 0;
 }
 
 /**
@@ -154,10 +148,26 @@ void setup()
 {
     // シリアル通信の初期化
     Serial.begin(115200);
+#ifdef LED_BUILTIN
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+    bool ledState = false;
+#endif
     while (!Serial)
     {
-        // シリアルポートが接続されるまで待機
+#ifdef LED_BUILTIN
+        digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
+        ledState = !ledState;
+#endif
+        delay(500);
     }
+#ifdef LED_BUILTIN
+    for (int i = 0; i < 20; i++)
+    {
+        digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
+        ledState = !ledState;
+    }
+#endif
 
     Serial.println("Initializing Arduino HDLC RS485 Communication...");
 
@@ -197,14 +207,6 @@ void loop()
             // コールバック関数を呼び出し（互換性のため）
             onFrameReceived(buffer, receivedLength, true); // CRC検証は内部で実施済み
         }
-    }
-
-    // 受信データの確認 (コールバックが設定されていない場合)
-    String receivedHex = hdlc.readFrameAsHexString();
-    if (receivedHex.length() > 0)
-    {
-        Serial.print("Received (from queue): ");
-        Serial.println(receivedHex);
     }
 
     // 少し待機

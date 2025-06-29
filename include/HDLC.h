@@ -53,11 +53,11 @@ public:
     bool transmitFrame(const uint8_t *data, size_t length);
 
     /**
-     * @brief 16進数文字列をバイト配列に変換して送信
+     * @brief 16進数文字列をバイト配列に変換して送信（char配列版）
      * @param hexString 16進数文字列 (例: "00F0A1")
      * @return true 送信成功, false 送信失敗
      */
-    bool transmitHexString(const String &hexString);
+    bool transmitHexString(const char *hexString);
 
     /**
      * @brief フレーム受信（低レベルビット制御）
@@ -73,12 +73,6 @@ public:
      * @return 読み出したデータ長 (0の場合はデータなし)
      */
     size_t readFrame(uint8_t *buffer, size_t bufferSize);
-
-    /**
-     * @brief 受信データを16進数文字列として取得
-     * @return 16進数文字列 (データがない場合は空文字列)
-     */
-    String readFrameAsHexString();
 
     /**
      * @brief CRC-16計算
@@ -185,21 +179,13 @@ private:
     size_t _createFrameBits(const uint8_t *data, size_t length, uint8_t *frameBits, size_t maxBits);
 
     /**
-     * @brief 16進数文字列をバイト配列に変換
+     * @brief 16進数文字列をバイト配列に変換（char配列版）
      * @param hexString 16進数文字列
      * @param buffer 変換結果のバッファ
      * @param maxLength バッファの最大長
      * @return 変換されたバイト数
      */
-    size_t _hexStringToBytes(const String &hexString, uint8_t *buffer, size_t maxLength);
-
-    /**
-     * @brief バイト配列を16進数文字列に変換
-     * @param data バイト配列
-     * @param length データ長
-     * @return 16進数文字列
-     */
-    String _bytesToHexString(const uint8_t *data, size_t length);
+    size_t _hexStringToBytes(const char *hexString, uint8_t *buffer, size_t maxLength);
 
     /**
      * @brief 受信ビットの処理
